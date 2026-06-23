@@ -1,0 +1,62 @@
+{
+  "name": "@pedra-ai/mcp",
+  "version": "0.1.0",
+  "description": "Official Model Context Protocol (MCP) server for the Pedra API — use Pedra's AI real-estate photo editing (virtual staging, renovation, enhancement, sky replacement, object removal/blur, and video) from Claude, ChatGPT, Cursor, and other MCP clients.",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "pedra",
+    "mcp",
+    "model-context-protocol",
+    "modelcontextprotocol",
+    "claude",
+    "cursor",
+    "real-estate",
+    "proptech",
+    "virtual-staging",
+    "renovation",
+    "interior-design",
+    "ai",
+    "image-editing"
+  ],
+  "license": "MIT",
+  "author": "Pedra <felix@pedra.ai> (https://pedra.ai)",
+  "homepage": "https://github.com/pedra-ai/pedra-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pedra-ai/pedra-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pedra-ai/pedra-mcp/issues"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "pedra-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run clean && npm run build",
+    "test": "npm run build && node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@pedra-ai/sdk": "^0.1.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "typescript": "^5.4.0"
+  }
+}

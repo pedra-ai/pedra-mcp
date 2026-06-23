@@ -1,0 +1,15 @@
+# Changelog
+
+## 0.1.0
+
+- Initial release.
+- MCP server exposing one tool per Pedra API endpoint: `pedra_enhance`,
+  `pedra_enhance_and_correct_perspective`, `pedra_empty_room`, `pedra_furnish`,
+  `pedra_renovation`, `pedra_edit_via_prompt`, `pedra_sky_blue`,
+  `pedra_remove_object`, `pedra_blur`, `pedra_create_video`, `pedra_credits`,
+  `pedra_feedback`.
+- Thin wrapper over [`@pedra-ai/sdk`](https://www.npmjs.com/package/@pedra-ai/sdk):
+  each tool is a single blocking call that returns the final asset URL(s).
+- API key via the `PEDRA_API_KEY` environment variable; the API's 4xx errors
+  (insufficient credits, bad image, …) surface as MCP tool errors.
+- stdio transport; runs via `npx -y @pedra-ai/mcp`.
