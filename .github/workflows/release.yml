@@ -1,0 +1,47 @@
+name: Release
+
+# Tag a version (e.g. `git tag v0.1.1 && git push origin v0.1.1`) to:
+#   1. publish @pedra-ai/mcp to npm (with provenance), and
+#   2. publish server.json to the official MCP registry (registry.modelcontextprotocol.io).
+#
+# Requires one repo secret: NPM_TOKEN (an npm automation token for the @pedra-ai org).
+# The MCP registry publish needs no secret — it authenticates with the workflow's
+# GitHub OIDC token, which authorizes the `io.github.pedra-ai/*` namespace.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write # npm provenance + mcp-publisher github-oidc
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm ci
+      - run: npm test
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Install mcp-publisher
+        run: |
+          curl -sSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" \
+            | tar -xz mcp-publisher
+
+      - name: Publish to the official MCP registry
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
