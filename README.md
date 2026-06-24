@@ -93,9 +93,19 @@ npx -y @smithery/cli install @pedra-ai/mcp --client claude
 | `pedra_credits` | `/credits` | Read plan + remaining credits |
 | `pedra_feedback` | `/feedback` | Thumbs up/down + optional credit-back |
 
-Most image tools take an `imageUrl` (a public URL or a `data:` URL) plus a few optional parameters; see each tool's input schema in your MCP client. Example prompts once connected:
+Most image tools take an `imageUrl` plus a few optional parameters; see each tool's input schema in your MCP client. The `imageUrl` (and `maskUrl`, and each `create_video` frame) accepts any of:
+
+- a public `https://` URL,
+- a `data:` URI, or
+- an **absolute path to a local image file** — the server reads it off disk and inlines it as base64 for you, so you can point a tool at a file you just dragged in without hosting it first (`.jpg`, `.jpeg`, `.png`, `.webp`, `.gif`, `.bmp`, `.tif/.tiff`, `.heic/.heif`, `.avif`; up to 40 MB).
+
+> Note: an image **pasted into the chat** is not a file path, so it can't be forwarded to the tool — drag in a file, or save the paste and pass its path.
+
+Example prompts once connected:
 
 > "Use Pedra to virtually stage https://example.com/empty-living-room.jpg as a minimalist living room."
+
+> "Virtually stage /Users/me/Desktop/empty-living-room.jpg as a minimalist living room."
 
 > "How many Pedra credits do I have left?"
 
