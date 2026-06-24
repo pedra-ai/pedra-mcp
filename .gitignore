@@ -1,5 +1,6 @@
 node_modules/
 dist/
 *.log
+*.mcpb
 .DS_Store
 .env

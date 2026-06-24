@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.2
+
+- Add behavioral annotations to every tool (`readOnlyHint`/`destructiveHint`/
+  `openWorldHint` + `title`) — `pedra_credits` is read-only; the rest create
+  new assets and are non-destructive. Required for the Claude connectors
+  directory.
+- Add `manifest.json` + `.mcpbignore` so the server can be packaged as a Claude
+  Desktop Extension (`.mcpb`) — self-contained bundle, one-click install,
+  `PEDRA_API_KEY` collected via `user_config`.
+- README: Privacy Policy section + one-click `.mcpb` install instructions.
+
 ## 0.1.1
 
 - Add MCP registry artifacts: `server.json` (official registry manifest) and

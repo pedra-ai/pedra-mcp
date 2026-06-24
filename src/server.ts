@@ -8,7 +8,7 @@ import {
 } from "@pedra-ai/sdk";
 
 export const SERVER_NAME = "pedra";
-export const SERVER_VERSION = "0.1.1";
+export const SERVER_VERSION = "0.1.2";
 
 /** A Pedra-shaped client. Typed structurally so tests can inject a fake. */
 export type PedraClient = Pick<
@@ -70,10 +70,17 @@ function guard(
   };
 }
 
+type ToolAnnotations = {
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  openWorldHint?: boolean;
+};
+
 type ToolConfig = {
   title: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  annotations?: ToolAnnotations;
 };
 
 /**
@@ -88,7 +95,21 @@ function register(
   config: ToolConfig,
   handler: (args: any) => Promise<ToolResult>,
 ): void {
-  (server.registerTool as any)(name, config, handler);
+  // Every tool advertises a `title` + behavioral hints (required for the
+  // Claude connectors directory). All endpoints hit the external Pedra API and
+  // create new assets — none mutate or delete existing data — so the default is
+  // non-read-only, non-destructive, open-world; tools override as needed.
+  const fullConfig = {
+    ...config,
+    annotations: {
+      title: config.title,
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: true,
+      ...config.annotations,
+    },
+  };
+  (server.registerTool as any)(name, fullConfig, handler);
 }
 
 // --- shared field schemas ----------------------------------------------------
@@ -356,6 +377,7 @@ export function createServer(client: PedraClient): McpServer {
       description:
         "Read the account's plan and remaining credits. Never deducts credits.",
       inputSchema: {},
+      annotations: { readOnlyHint: true },
     },
     guard(async () => {
       const res = await client.credits();

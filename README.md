@@ -15,9 +15,13 @@ You need a Pedra API key — get one from your [Pedra account](https://app.pedra
 
 The server runs over stdio and is published to npm, so most clients just run it with `npx` — no global install needed.
 
-### Claude Desktop
+### Claude Desktop (one-click)
 
-Add this to your `claude_desktop_config.json` (Settings → Developer → Edit Config):
+Download the latest **`pedra-mcp.mcpb`** from [Releases](https://github.com/pedra-ai/pedra-mcp/releases) and double-click it (or drag it into Claude Desktop → Settings → Extensions). Claude installs the bundled server and prompts for your `PEDRA_API_KEY` — no JSON editing.
+
+### Claude Desktop (manual)
+
+Or add this to your `claude_desktop_config.json` (Settings → Developer → Edit Config):
 
 ```json
 {
@@ -101,6 +105,10 @@ This server is a thin wrapper over [`@pedra-ai/sdk`](https://www.npmjs.com/packa
 
 - **Synchronous by design.** Every endpoint blocks and returns the final URL(s) in the response body. Even `pedra_create_video` polls server-side and returns the finished `videoUrl` inline (it can take up to ~10 minutes; the API keeps the connection alive with a heartbeat).
 - **Errors are tool errors.** The API's 4xx responses (insufficient credits, bad image, …) come back as MCP tool errors with a readable message, not crashes.
+
+## Privacy Policy
+
+This server sends the image/video URLs and parameters you pass to the [Pedra API](https://pedra.ai) to perform the requested edit, authenticated with your `PEDRA_API_KEY`. It stores no data itself. Data collection, usage, storage, retention, third-party sharing, and contact information are covered by Pedra's privacy policy: **https://pedra.ai/privacy**.
 
 ## License
 
