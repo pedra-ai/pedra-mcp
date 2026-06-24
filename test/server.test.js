@@ -1,5 +1,8 @@
 const { test } = require("node:test");
 const assert = require("node:assert");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { Client } = require("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = require("@modelcontextprotocol/sdk/inMemory.js");
 const { PedraApiError } = require("@pedra-ai/sdk");
@@ -127,4 +130,105 @@ test("invalid input (missing required imageUrl) is rejected", async () => {
     arguments: { prompt: "make it brighter" },
   });
   assert.strictEqual(res.isError, true);
+});
+
+// Captures the args the client receives so we can assert on what the server
+// forwards to the API after local-image resolution.
+function capturingClient() {
+  const seen = {};
+  const img = (url) => ({ message: "ok", url, urls: [url], raw: {} });
+  return {
+    client: fakeClient({
+      enhance: async (a) => {
+        seen.enhance = a;
+        return img("https://img.pedra.ai/enhanced");
+      },
+      createVideo: async (a) => {
+        seen.createVideo = a;
+        return {
+          message: "done",
+          videoId: "v1",
+          videoUrl: "https://img.pedra.ai/video.mp4",
+          raw: {},
+        };
+      },
+    }),
+    seen,
+  };
+}
+
+test("a local image path is read and inlined as a base64 data URI", async () => {
+  const file = path.join(os.tmpdir(), `pedra-mcp-test-${process.pid}.png`);
+  fs.writeFileSync(file, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]));
+  const { client, seen } = capturingClient();
+  const mcp = await connect(client);
+  try {
+    const res = await mcp.callTool({
+      name: "pedra_enhance",
+      arguments: { imageUrl: file },
+    });
+    assert.ok(!res.isError, textOf(res));
+    assert.match(seen.enhance.imageUrl, /^data:image\/png;base64,/);
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
+});
+
+test("remote URLs and data URIs pass through untouched", async () => {
+  const { client, seen } = capturingClient();
+  const mcp = await connect(client);
+  await mcp.callTool({
+    name: "pedra_enhance",
+    arguments: { imageUrl: "https://example.com/room.jpg" },
+  });
+  assert.strictEqual(seen.enhance.imageUrl, "https://example.com/room.jpg");
+
+  const dataUri = "data:image/png;base64,AAAA";
+  await mcp.callTool({
+    name: "pedra_enhance",
+    arguments: { imageUrl: dataUri },
+  });
+  assert.strictEqual(seen.enhance.imageUrl, dataUri);
+});
+
+test("per-frame local paths in create_video are inlined too", async () => {
+  const file = path.join(os.tmpdir(), `pedra-mcp-video-${process.pid}.jpg`);
+  fs.writeFileSync(file, Buffer.from([0xff, 0xd8, 0xff]));
+  const { client, seen } = capturingClient();
+  const mcp = await connect(client);
+  try {
+    await mcp.callTool({
+      name: "pedra_create_video",
+      arguments: { images: [{ imageUrl: file }] },
+    });
+    assert.match(seen.createVideo.images[0].imageUrl, /^data:image\/jpeg;base64,/);
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
+});
+
+test("a missing local file surfaces as a tool error, not a crash", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({
+    name: "pedra_enhance",
+    arguments: { imageUrl: "/no/such/file/definitely-missing.png" },
+  });
+  assert.strictEqual(res.isError, true);
+  assert.match(textOf(res), /Could not read local image/);
+});
+
+test("an unsupported local file type is rejected with a clear message", async () => {
+  const file = path.join(os.tmpdir(), `pedra-mcp-test-${process.pid}.txt`);
+  fs.writeFileSync(file, "not an image");
+  const mcp = await connect(fakeClient());
+  try {
+    const res = await mcp.callTool({
+      name: "pedra_enhance",
+      arguments: { imageUrl: file },
+    });
+    assert.strictEqual(res.isError, true);
+    assert.match(textOf(res), /Unsupported local image type/);
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
 });

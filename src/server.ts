@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { extname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
@@ -8,7 +12,7 @@ import {
 } from "@pedra-ai/sdk";
 
 export const SERVER_NAME = "pedra";
-export const SERVER_VERSION = "0.1.2";
+export const SERVER_VERSION = "0.2.0";
 
 /** A Pedra-shaped client. Typed structurally so tests can inject a fake. */
 export type PedraClient = Pick<
@@ -70,6 +74,114 @@ function guard(
   };
 }
 
+// --- local image inlining ----------------------------------------------------
+
+/**
+ * Extension → image MIME type. Pedra accepts a `data:` URI, so a local file a
+ * user drags or drops in becomes a base64 data URI we build from one of these.
+ */
+const MIME_BY_EXT: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".bmp": "image/bmp",
+  ".tif": "image/tiff",
+  ".tiff": "image/tiff",
+  ".heic": "image/heic",
+  ".heif": "image/heif",
+  ".avif": "image/avif",
+};
+
+/** Ceiling on an inlined local file, so a stray path can't build a runaway data URI. */
+const MAX_LOCAL_IMAGE_BYTES = 40 * 1024 * 1024;
+
+/**
+ * Resolve one image input into a value the Pedra API accepts. Remote URLs and
+ * existing `data:` URIs pass through untouched; anything else is treated as a
+ * path to a local file — the form a terminal or drag-and-drop inserts — and
+ * read off disk into a base64 `data:` URI. This is what lets a user point a
+ * tool at a local image instead of having to host it somewhere first.
+ */
+function resolveImageInput(value: string): string {
+  const raw = value.trim();
+  if (/^(https?:|data:)/i.test(raw)) return raw;
+
+  let path = raw;
+  // Drag-and-drop and shells wrap or escape paths in a few predictable ways.
+  if (
+    (path.startsWith('"') && path.endsWith('"')) ||
+    (path.startsWith("'") && path.endsWith("'"))
+  ) {
+    path = path.slice(1, -1);
+  }
+  if (path.startsWith("file://")) {
+    path = fileURLToPath(path);
+  } else {
+    path = path.replace(/\\ /g, " "); // unescape "\ " from dragged paths
+    if (path === "~" || path.startsWith("~/")) {
+      path = homedir() + path.slice(1);
+    }
+  }
+
+  const ext = extname(path).toLowerCase();
+  const mime = MIME_BY_EXT[ext];
+  if (!mime) {
+    throw new PedraError(
+      `Unsupported local image type "${ext || "(none)"}" for ${path}. ` +
+        `Supported: ${Object.keys(MIME_BY_EXT).join(", ")}. ` +
+        `Otherwise pass a public https:// URL or a data: URI.`,
+    );
+  }
+
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(path);
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    throw new PedraError(`Could not read local image at ${path}: ${why}`);
+  }
+  if (bytes.byteLength > MAX_LOCAL_IMAGE_BYTES) {
+    const mb = (bytes.byteLength / 1024 / 1024).toFixed(1);
+    throw new PedraError(
+      `Local image at ${path} is ${mb} MB, over the ` +
+        `${MAX_LOCAL_IMAGE_BYTES / 1024 / 1024} MB inline limit. ` +
+        `Resize it or host it at a public URL.`,
+    );
+  }
+  return `data:${mime};base64,${bytes.toString("base64")}`;
+}
+
+/**
+ * Return a shallow copy of a tool's args with every image-bearing field
+ * resolved (see {@link resolveImageInput}). Covers the flat image tools plus
+ * the per-frame images in `pedra_create_video`. Intentionally does NOT touch
+ * `pedra_feedback`, whose `imageUrl` is an already-generated asset URL.
+ */
+function withResolvedImages<T extends Record<string, any>>(args: T): T {
+  if (!args || typeof args !== "object") return args;
+  const out: Record<string, any> = { ...args };
+  if (typeof out.imageUrl === "string")
+    out.imageUrl = resolveImageInput(out.imageUrl);
+  if (typeof out.maskUrl === "string")
+    out.maskUrl = resolveImageInput(out.maskUrl);
+  if (typeof out.secondImageUrl === "string")
+    out.secondImageUrl = resolveImageInput(out.secondImageUrl);
+  if (Array.isArray(out.images)) {
+    out.images = out.images.map((frame: any) => {
+      if (!frame || typeof frame !== "object") return frame;
+      const f = { ...frame };
+      if (typeof f.imageUrl === "string")
+        f.imageUrl = resolveImageInput(f.imageUrl);
+      if (typeof f.secondImageUrl === "string")
+        f.secondImageUrl = resolveImageInput(f.secondImageUrl);
+      return f;
+    });
+  }
+  return out as T;
+}
+
 type ToolAnnotations = {
   readOnlyHint?: boolean;
   destructiveHint?: boolean;
@@ -116,7 +228,9 @@ function register(
 
 const imageUrl = z
   .string()
-  .describe("URL (or data: URL) of the source image.");
+  .describe(
+    "Source image: a public https:// URL, a data: URI, or an absolute path to a local image file (the file is read and inlined automatically).",
+  );
 const creativity = z
   .enum(["Low", "Medium", "High"])
   .describe('Strength of the AI transformation. Defaults to "Medium".');
@@ -149,7 +263,7 @@ export function createServer(client: PedraClient): McpServer {
         preserveOriginalFraming: preserveOriginalFraming.optional(),
       },
     },
-    guard(async (a) => imageOut(await client.enhance(a))),
+    guard(async (a) => imageOut(await client.enhance(withResolvedImages(a)))),
   );
 
   register(
@@ -164,7 +278,9 @@ export function createServer(client: PedraClient): McpServer {
         preserveOriginalFraming: preserveOriginalFraming.optional(),
       },
     },
-    guard(async (a) => imageOut(await client.enhanceAndCorrectPerspective(a))),
+    guard(async (a) =>
+      imageOut(await client.enhanceAndCorrectPerspective(withResolvedImages(a))),
+    ),
   );
 
   register(
@@ -176,7 +292,7 @@ export function createServer(client: PedraClient): McpServer {
         "Remove all furniture and objects from a room, leaving an empty space. Returns the emptied image URL.",
       inputSchema: { imageUrl },
     },
-    guard(async (a) => imageOut(await client.empty(a))),
+    guard(async (a) => imageOut(await client.empty(withResolvedImages(a)))),
   );
 
   register(
@@ -199,7 +315,7 @@ export function createServer(client: PedraClient): McpServer {
         creativity: creativity.optional(),
       },
     },
-    guard(async (a) => imageOut(await client.furnish(a))),
+    guard(async (a) => imageOut(await client.furnish(withResolvedImages(a)))),
   );
 
   register(
@@ -225,7 +341,7 @@ export function createServer(client: PedraClient): McpServer {
         roomType: z.string().describe("Room type. Auto-detected if omitted.").optional(),
       },
     },
-    guard(async (a) => imageOut(await client.renovation(a))),
+    guard(async (a) => imageOut(await client.renovation(withResolvedImages(a)))),
   );
 
   register(
@@ -242,7 +358,7 @@ export function createServer(client: PedraClient): McpServer {
           .describe("Natural-language description of the edit to apply."),
       },
     },
-    guard(async (a) => imageOut(await client.editViaPrompt(a))),
+    guard(async (a) => imageOut(await client.editViaPrompt(withResolvedImages(a)))),
   );
 
   register(
@@ -257,7 +373,7 @@ export function createServer(client: PedraClient): McpServer {
         skyStyle: z.string().describe("Optional named sky style.").optional(),
       },
     },
-    guard(async (a) => imageOut(await client.sky(a))),
+    guard(async (a) => imageOut(await client.sky(withResolvedImages(a)))),
   );
 
   register(
@@ -271,10 +387,12 @@ export function createServer(client: PedraClient): McpServer {
         imageUrl,
         maskUrl: z
           .string()
-          .describe("URL of the mask image marking the region to remove."),
+          .describe(
+            "Mask image marking the region to remove: a public https:// URL, a data: URI, or a local file path.",
+          ),
       },
     },
-    guard(async (a) => imageOut(await client.remove(a))),
+    guard(async (a) => imageOut(await client.remove(withResolvedImages(a)))),
   );
 
   register(
@@ -291,7 +409,7 @@ export function createServer(client: PedraClient): McpServer {
           .describe('Labels/regions to blur, e.g. ["faces", "license plates"].'),
       },
     },
-    guard(async (a) => imageOut(await client.blur(a))),
+    guard(async (a) => imageOut(await client.blur(withResolvedImages(a)))),
   );
 
   register(
@@ -360,7 +478,7 @@ export function createServer(client: PedraClient): McpServer {
       },
     },
     guard(async (a) => {
-      const res = await client.createVideo(a);
+      const res = await client.createVideo(withResolvedImages(a));
       return ok({
         message: res.message,
         videoId: res.videoId,

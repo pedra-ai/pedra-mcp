@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0
+
+- Image inputs now accept a **local file path**, not just a URL or `data:` URI.
+  When `imageUrl`/`maskUrl` (and each `create_video` frame) is a local path, the
+  server reads the file and inlines it as a base64 `data:` URI before calling the
+  API — so you can point a tool at a file you dragged in without hosting it first.
+  Handles `file://`, `~`, and quoted/space-escaped paths; supports common image
+  types up to 40 MB; unsupported types and unreadable files surface as clear tool
+  errors. (Pasting an image into the chat is unchanged — that's not a file path,
+  so pass a path or URL.)
+
 ## 0.1.2
 
 - Add behavioral annotations to every tool (`readOnlyHint`/`destructiveHint`/
