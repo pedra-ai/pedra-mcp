@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.1
+
+- Add MCP registry artifacts: `server.json` (official registry manifest) and
+  `smithery.yaml` (Smithery stdio config).
+- Add `mcpName` (`io.github.pedra-ai/pedra-mcp`) to `package.json` to prove npm
+  package ownership to the official registry.
+- Add `.github/workflows/release.yml`: a tagged release now publishes to npm
+  (with provenance) and to the official MCP registry via GitHub OIDC.
+- No runtime/tool changes.
+
 ## 0.1.0
 
 - Initial release.

@@ -1,0 +1,21 @@
+# Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
+# Pedra MCP is published to npm (@pedra-ai/mcp) and runs locally over stdio.
+
+startCommand:
+  type: stdio
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - pedraApiKey
+    properties:
+      pedraApiKey:
+        type: string
+        title: Pedra API Key
+        description: Your Pedra API key. Get one at https://app.pedra.ai.
+  commandFunction:
+    # A function that produces the CLI command to start the MCP on stdio.
+    |-
+    (config) => ({ command: 'npx', args: ['-y', '@pedra-ai/mcp'], env: { PEDRA_API_KEY: config.pedraApiKey } })
+  exampleConfig:
+    pedraApiKey: your-pedra-api-key

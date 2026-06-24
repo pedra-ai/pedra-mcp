@@ -1,0 +1,31 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.pedra-ai/pedra-mcp",
+  "title": "Pedra",
+  "description": "AI real-estate photo editing via the Pedra API: virtual staging, renovation, enhancement, video.",
+  "version": "0.1.1",
+  "websiteUrl": "https://pedra.ai/api-documentation",
+  "repository": {
+    "url": "https://github.com/pedra-ai/pedra-mcp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@pedra-ai/mcp",
+      "version": "0.1.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "PEDRA_API_KEY",
+          "description": "Your Pedra API key. Get one at https://app.pedra.ai.",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

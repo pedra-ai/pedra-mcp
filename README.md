@@ -3,6 +3,8 @@
 Official [Model Context Protocol](https://modelcontextprotocol.io) server for the [Pedra API](https://pedra.ai/api-documentation) — use Pedra's AI real-estate photo editing (virtual staging, renovation, room emptying, enhancement, sky replacement, object removal/blur, and property videos) directly from **Claude, ChatGPT, Cursor**, and any other MCP client.
 
 [![npm version](https://img.shields.io/npm/v/@pedra-ai/mcp.svg)](https://www.npmjs.com/package/@pedra-ai/mcp)
+[![Official MCP registry](https://img.shields.io/badge/MCP%20registry-pedra--mcp-blue)](https://registry.modelcontextprotocol.io)
+[![smithery badge](https://smithery.ai/badge/@pedra-ai/mcp)](https://smithery.ai/server/@pedra-ai/mcp)
 
 It exposes **one tool per API endpoint**. Each tool is a single blocking call that returns the final asset URL(s) — there are no job IDs to poll.
 
@@ -58,6 +60,16 @@ Or install it:
 npm install -g @pedra-ai/mcp
 PEDRA_API_KEY=your-api-key pedra-mcp
 ```
+
+### Smithery
+
+You can also install and configure Pedra automatically via [Smithery](https://smithery.ai/server/@pedra-ai/mcp):
+
+```bash
+npx -y @smithery/cli install @pedra-ai/mcp --client claude
+```
+
+(swap `claude` for `cursor`, `windsurf`, etc.) Smithery prompts for your `PEDRA_API_KEY` and writes the client config for you.
 
 ## Tools
 

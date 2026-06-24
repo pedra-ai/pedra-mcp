@@ -8,7 +8,7 @@ import {
 } from "@pedra-ai/sdk";
 
 export const SERVER_NAME = "pedra";
-export const SERVER_VERSION = "0.1.0";
+export const SERVER_VERSION = "0.1.1";
 
 /** A Pedra-shaped client. Typed structurally so tests can inject a fake. */
 export type PedraClient = Pick<
