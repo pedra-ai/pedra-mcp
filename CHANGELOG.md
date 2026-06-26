@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Add a bundle `icon.png` (512×512) and reference it from `manifest.json` so the
+  server displays with the Pedra logo in Claude Desktop and the Anthropic MCP
+  directory. Also ship the icon in the npm tarball (`files`) for registries that
+  ingest the icon from npm. No runtime/tool changes.
+
 ## 0.2.0
 
 - Image inputs now accept a **local file path**, not just a URL or `data:` URI.

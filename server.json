@@ -3,7 +3,7 @@
   "name": "io.github.pedra-ai/pedra-mcp",
   "title": "Pedra",
   "description": "AI real-estate photo editing via the Pedra API: virtual staging, renovation, enhancement, video.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "websiteUrl": "https://pedra.ai/api-documentation",
   "repository": {
     "url": "https://github.com/pedra-ai/pedra-mcp",
@@ -14,7 +14,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@pedra-ai/mcp",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "transport": {
         "type": "stdio"
       },

@@ -1,6 +1,6 @@
 {
   "name": "@pedra-ai/mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "mcpName": "io.github.pedra-ai/pedra-mcp",
   "description": "Official Model Context Protocol (MCP) server for the Pedra API — use Pedra's AI real-estate photo editing (virtual staging, renovation, enhancement, sky replacement, object removal/blur, and video) from Claude, ChatGPT, Cursor, and other MCP clients.",
   "publishConfig": {
@@ -38,6 +38,7 @@
   },
   "files": [
     "dist",
+    "icon.png",
     "README.md",
     "LICENSE"
   ],

@@ -2,7 +2,8 @@
   "manifest_version": "0.3",
   "name": "pedra-mcp",
   "display_name": "Pedra — AI Real Estate Photo & Video Editing",
-  "version": "0.2.0",
+  "version": "0.2.1",
+  "icon": "icon.png",
   "description": "AI real-estate photo and video editing: virtual staging, renovation, room emptying, enhancement, sky replacement, object removal/blur, and property videos via the Pedra API.",
   "long_description": "Pedra brings AI real-estate media editing into Claude. One tool per Pedra API endpoint — virtual staging (furnish), renovation, empty room, photo enhancement, perspective correction, natural-language editing, sky replacement, object removal, privacy blur, and property video generation. Each tool is a single blocking call that returns the final image or video URL. Requires a Pedra API key (PEDRA_API_KEY), available at https://app.pedra.ai.",
   "author": {
