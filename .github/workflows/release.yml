@@ -1,12 +1,15 @@
 name: Release
 
 # Tag a version (e.g. `git tag v0.1.1 && git push origin v0.1.1`) to:
-#   1. publish @pedra-ai/mcp to npm (with provenance), and
-#   2. publish server.json to the official MCP registry (registry.modelcontextprotocol.io).
+#   1. publish @pedra-ai/mcp to npm (with provenance),
+#   2. publish server.json to the official MCP registry (registry.modelcontextprotocol.io), and
+#   3. build the .mcpb bundle and attach it to a GitHub Release for the tag
+#      (so the Anthropic MCP directory can pick up new versions from Releases).
 #
 # Requires one repo secret: NPM_TOKEN (an npm automation token for the @pedra-ai org).
 # The MCP registry publish needs no secret — it authenticates with the workflow's
 # GitHub OIDC token, which authorizes the `io.github.pedra-ai/*` namespace.
+# The GitHub Release uses the built-in GITHUB_TOKEN (needs contents: write).
 
 on:
   push:
@@ -14,16 +17,16 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write # create GitHub Release + upload the .mcpb asset
   id-token: write # npm provenance + mcp-publisher github-oidc
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           registry-url: "https://registry.npmjs.org"
@@ -35,6 +38,18 @@ jobs:
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Build .mcpb bundle
+        run: npx --yes @anthropic-ai/mcpb pack . "pedra-mcp-${GITHUB_REF_NAME}.mcpb"
+
+      - name: Create GitHub Release with the .mcpb bundle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "pedra-mcp-${GITHUB_REF_NAME}.mcpb" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "Bundle (.mcpb) and npm package for ${GITHUB_REF_NAME}. See CHANGELOG.md for details."
 
       - name: Install mcp-publisher
         run: |
