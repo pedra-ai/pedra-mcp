@@ -90,6 +90,14 @@ npx -y @smithery/cli install @pedra-ai/mcp --client claude
 | `pedra_remove_object` | `/remove_object` | Remove an object using a mask |
 | `pedra_blur` | `/blur` | Blur faces, license plates, etc. |
 | `pedra_create_video` | `/create_video` | Render a property video from images |
+| `pedra_update_video` | `/update_video` | Edit a video without re-rendering unchanged clips |
+| `pedra_generate_voice_script` | `/generate_voice_script` | Write a voiceover script from property photos |
+| `pedra_generate_voice` | `/generate_voice` | Turn a script into a voiceover audio track |
+| `pedra_music_library` | `/music_library` | List background-music tracks + voice languages |
+| `pedra_list_properties` | `/list_properties` | List the account's properties |
+| `pedra_list_property_images` | `/list_property_images` | List a property's photos as URLs |
+| `pedra_create_property` | `/create_property` | Create a property |
+| `pedra_add_images_to_property` | `/add_images_to_property` | Add photos to a property by URL |
 | `pedra_credits` | `/credits` | Read plan + remaining credits |
 | `pedra_feedback` | `/feedback` | Thumbs up/down + optional credit-back |
 
