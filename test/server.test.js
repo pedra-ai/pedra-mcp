@@ -23,10 +23,10 @@ const EXPECTED_TOOLS = [
   "pedra_generate_voice_script",
   "pedra_generate_voice",
   "pedra_music_library",
-  "pedra_list_projects",
-  "pedra_list_project_images",
-  "pedra_create_project",
-  "pedra_add_images_to_project",
+  "pedra_list_properties",
+  "pedra_list_property_images",
+  "pedra_create_property",
+  "pedra_add_images_to_property",
   "pedra_credits",
   "pedra_feedback",
 ];
@@ -75,28 +75,28 @@ function fakeClient(overrides = {}) {
       voiceLanguages: ["English"],
       raw: {},
     }),
-    listProjects: async () => ({
-      projects: [{ projectId: "p1", name: "Listing", photoCount: 3, appUrl: "https://app.pedra.ai/?projectId=p1" }],
+    listProperties: async () => ({
+      properties: [{ propertyId: "p1", name: "Listing", photoCount: 3, appUrl: "https://app.pedra.ai/?propertyId=p1" }],
       raw: {},
     }),
-    listProjectImages: async () => ({
-      projectId: "p1",
+    listPropertyImages: async () => ({
+      propertyId: "p1",
       name: "Listing",
       images: [{ imageId: "i1", url: "https://img.pedra.ai/i1", aspectRatio: 1.5 }],
       raw: {},
     }),
-    createProject: async () => ({
-      message: "Project created",
-      projectId: "p2",
-      appUrl: "https://app.pedra.ai/?projectId=p2",
+    createProperty: async () => ({
+      message: "Property created",
+      propertyId: "p2",
+      appUrl: "https://app.pedra.ai/?propertyId=p2",
       raw: {},
     }),
-    addImagesToProject: async () => ({
+    addImagesToProperty: async () => ({
       message: "Added 1 image(s)",
-      projectId: "p1",
+      propertyId: "p1",
       added: [{ imageId: "i9", url: "https://img.pedra.ai/i9" }],
       failed: [],
-      appUrl: "https://app.pedra.ai/?projectId=p1",
+      appUrl: "https://app.pedra.ai/?propertyId=p1",
       raw: {},
     }),
     credits: async () => ({ plan: "pro", creditsRemaining: 42, raw: {} }),
@@ -209,44 +209,44 @@ test("music_library lists tracks", async () => {
   assert.match(textOf(res), /cinematic|chill/);
 });
 
-test("list_projects returns projects", async () => {
+test("list_properties returns properties", async () => {
   const mcp = await connect(fakeClient());
-  const res = await mcp.callTool({ name: "pedra_list_projects", arguments: {} });
+  const res = await mcp.callTool({ name: "pedra_list_properties", arguments: {} });
   assert.ok(!res.isError);
-  assert.match(textOf(res), /"projectId": "p1"/);
+  assert.match(textOf(res), /"propertyId": "p1"/);
 });
 
-test("list_project_images returns photo URLs", async () => {
+test("list_property_images returns photo URLs", async () => {
   const mcp = await connect(fakeClient());
-  const res = await mcp.callTool({ name: "pedra_list_project_images", arguments: { projectId: "p1" } });
+  const res = await mcp.callTool({ name: "pedra_list_property_images", arguments: { propertyId: "p1" } });
   assert.ok(!res.isError);
   assert.match(textOf(res), /img\.pedra\.ai\/i1/);
 });
 
-test("create_project returns id + appUrl", async () => {
+test("create_property returns id + appUrl", async () => {
   const mcp = await connect(fakeClient());
-  const res = await mcp.callTool({ name: "pedra_create_project", arguments: { name: "New" } });
+  const res = await mcp.callTool({ name: "pedra_create_property", arguments: { name: "New" } });
   assert.ok(!res.isError);
-  assert.match(textOf(res), /projectId=p2/);
+  assert.match(textOf(res), /propertyId=p2/);
 });
 
-test("create_project requires nothing (name optional)", async () => {
+test("create_property requires nothing (name optional)", async () => {
   const mcp = await connect(fakeClient());
-  const res = await mcp.callTool({ name: "pedra_create_project", arguments: {} });
+  const res = await mcp.callTool({ name: "pedra_create_property", arguments: {} });
   assert.ok(!res.isError);
 });
 
-test("add_images_to_project requires projectId + imageUrls", async () => {
+test("add_images_to_property requires propertyId + imageUrls", async () => {
   const mcp = await connect(fakeClient());
-  const res = await mcp.callTool({ name: "pedra_add_images_to_project", arguments: { projectId: "p1" } });
+  const res = await mcp.callTool({ name: "pedra_add_images_to_property", arguments: { propertyId: "p1" } });
   assert.strictEqual(res.isError, true);
 });
 
-test("add_images_to_project returns stored URLs", async () => {
+test("add_images_to_property returns stored URLs", async () => {
   const mcp = await connect(fakeClient());
   const res = await mcp.callTool({
-    name: "pedra_add_images_to_project",
-    arguments: { projectId: "p1", imageUrls: ["https://x/a.jpg"] },
+    name: "pedra_add_images_to_property",
+    arguments: { propertyId: "p1", imageUrls: ["https://x/a.jpg"] },
   });
   assert.ok(!res.isError);
   assert.match(textOf(res), /img\.pedra\.ai\/i9/);

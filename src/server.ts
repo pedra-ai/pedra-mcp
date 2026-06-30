@@ -31,10 +31,10 @@ export type PedraClient = Pick<
   | "generateVoiceScript"
   | "generateVoice"
   | "musicLibrary"
-  | "listProjects"
-  | "listProjectImages"
-  | "createProject"
-  | "addImagesToProject"
+  | "listProperties"
+  | "listPropertyImages"
+  | "createProperty"
+  | "addImagesToProperty"
   | "credits"
   | "feedback"
 >;
@@ -631,81 +631,81 @@ export function createServer(client: PedraClient): McpServer {
 
   register(
     server,
-    "pedra_list_projects",
+    "pedra_list_properties",
     {
-      title: "List projects",
+      title: "List properties",
       description:
-        "List the user's Pedra projects (id, name, photo count, and an appUrl to open each in Pedra). Use this to find photos already in the account — e.g. to build a video from a listing's photos.",
+        "List the user's Pedra properties (id, name, photo count, and an appUrl to open each in Pedra). Use this to find photos already in the account — e.g. to build a video from a listing's photos.",
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
     guard(async () => {
-      const res = await client.listProjects();
-      return ok({ projects: res.projects });
+      const res = await client.listProperties();
+      return ok({ properties: res.properties });
     }),
   );
 
   register(
     server,
-    "pedra_list_project_images",
+    "pedra_list_property_images",
     {
-      title: "List project photos",
+      title: "List property photos",
       description:
-        "List a project's photos as img.pedra.ai URLs, ready to pass straight to pedra_create_video or the image-editing tools. Get the projectId from pedra_list_projects.",
+        "List a property's photos as img.pedra.ai URLs, ready to pass straight to pedra_create_video or the image-editing tools. Get the propertyId from pedra_list_properties.",
       inputSchema: {
-        projectId: z
+        propertyId: z
           .string()
-          .describe("The project's id (from pedra_list_projects)."),
+          .describe("The property's id (from pedra_list_properties)."),
       },
       annotations: { readOnlyHint: true },
     },
     guard(async (a) => {
-      const res = await client.listProjectImages(a);
-      return ok({ projectId: res.projectId, name: res.name, images: res.images });
+      const res = await client.listPropertyImages(a);
+      return ok({ propertyId: res.propertyId, name: res.name, images: res.images });
     }),
   );
 
   register(
     server,
-    "pedra_create_project",
+    "pedra_create_property",
     {
-      title: "Create project",
+      title: "Create property",
       description:
-        "Create a new Pedra project. Returns its projectId and an appUrl. To add brand-new local photos (which can't be uploaded through chat), give the user the appUrl to open the project in Pedra and drop their photos in, then use pedra_list_project_images.",
+        "Create a new Pedra property. Returns its propertyId and an appUrl. To add brand-new local photos (which can't be uploaded through chat), give the user the appUrl to open the property in Pedra and drop their photos in, then use pedra_list_property_images.",
       inputSchema: {
         name: z
           .string()
-          .describe("Project name, e.g. the listing address.")
+          .describe("Property name, e.g. the listing address.")
           .optional(),
       },
     },
     guard(async (a) => {
-      const res = await client.createProject(a);
-      return ok({ message: res.message, projectId: res.projectId, appUrl: res.appUrl });
+      const res = await client.createProperty(a);
+      return ok({ message: res.message, propertyId: res.propertyId, appUrl: res.appUrl });
     }),
   );
 
   register(
     server,
-    "pedra_add_images_to_project",
+    "pedra_add_images_to_property",
     {
-      title: "Add photos to project",
+      title: "Add photos to property",
       description:
-        "Add photos to a project BY URL — the server fetches each URL and stores it, so any public https image URL (or a small data: URI) works. Returns the stored img.pedra.ai URLs. For local files on the user's device, direct them to the project's appUrl instead (chat can't transfer large local files).",
+        "Add photos to a property BY URL — the server fetches each URL and stores it, so any public https image URL (or a small data: URI) works. Returns the stored img.pedra.ai URLs. For local files on the user's device, direct them to the property's appUrl instead (chat can't transfer large local files).",
       inputSchema: {
-        projectId: z
+        propertyId: z
           .string()
-          .describe("Target project id (from pedra_list_projects or pedra_create_project)."),
+          .describe("Target property id (from pedra_list_properties or pedra_create_property)."),
         imageUrls: z
           .array(z.string())
-          .describe("Up to 20 image URLs to fetch and add to the project."),
+          .describe("Up to 20 image URLs to fetch and add to the property."),
       },
     },
     guard(async (a) => {
-      const res = await client.addImagesToProject(a);
+      const res = await client.addImagesToProperty(a);
       return ok({
         message: res.message,
-        projectId: res.projectId,
+        propertyId: res.propertyId,
         added: res.added,
         failed: res.failed,
         appUrl: res.appUrl,
