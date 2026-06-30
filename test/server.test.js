@@ -19,6 +19,14 @@ const EXPECTED_TOOLS = [
   "pedra_remove_object",
   "pedra_blur",
   "pedra_create_video",
+  "pedra_update_video",
+  "pedra_generate_voice_script",
+  "pedra_generate_voice",
+  "pedra_music_library",
+  "pedra_list_projects",
+  "pedra_list_project_images",
+  "pedra_create_project",
+  "pedra_add_images_to_project",
   "pedra_credits",
   "pedra_feedback",
 ];
@@ -39,6 +47,56 @@ function fakeClient(overrides = {}) {
       message: "done",
       videoId: "v1",
       videoUrl: "https://img.pedra.ai/video.mp4",
+      raw: {},
+    }),
+    updateVideo: async () => ({
+      message: "updated",
+      videoId: "v1",
+      videoUrl: "https://img.pedra.ai/video2.mp4",
+      raw: {},
+    }),
+    generateVoiceScript: async () => ({
+      message: "ok",
+      script: "A bright, airy home.",
+      raw: {},
+    }),
+    generateVoice: async () => ({
+      message: "ok",
+      audioId: "a1",
+      audioUrl: "https://img.pedra.ai/audio/a1.mp3",
+      alignmentUrl: "https://img.pedra.ai/audio/a1.alignment.json",
+      duration: 7,
+      raw: {},
+    }),
+    musicLibrary: async () => ({
+      tracks: [{ track: "chill", label: "Chill Beats" }],
+      variantsPerTrack: 6,
+      defaultTrack: "chill",
+      voiceLanguages: ["English"],
+      raw: {},
+    }),
+    listProjects: async () => ({
+      projects: [{ projectId: "p1", name: "Listing", photoCount: 3, appUrl: "https://app.pedra.ai/?projectId=p1" }],
+      raw: {},
+    }),
+    listProjectImages: async () => ({
+      projectId: "p1",
+      name: "Listing",
+      images: [{ imageId: "i1", url: "https://img.pedra.ai/i1", aspectRatio: 1.5 }],
+      raw: {},
+    }),
+    createProject: async () => ({
+      message: "Project created",
+      projectId: "p2",
+      appUrl: "https://app.pedra.ai/?projectId=p2",
+      raw: {},
+    }),
+    addImagesToProject: async () => ({
+      message: "Added 1 image(s)",
+      projectId: "p1",
+      added: [{ imageId: "i9", url: "https://img.pedra.ai/i9" }],
+      failed: [],
+      appUrl: "https://app.pedra.ai/?projectId=p1",
       raw: {},
     }),
     credits: async () => ({ plan: "pro", creditsRemaining: 42, raw: {} }),
@@ -103,6 +161,95 @@ test("create_video returns the finished video URL", async () => {
   });
   assert.ok(!res.isError);
   assert.match(textOf(res), /video\.mp4/);
+});
+
+test("update_video returns the re-rendered video URL", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({
+    name: "pedra_update_video",
+    arguments: { videoId: "v1", music: { track: "cinematic" } },
+  });
+  assert.ok(!res.isError);
+  assert.match(textOf(res), /video2\.mp4/);
+});
+
+test("update_video requires a videoId", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({
+    name: "pedra_update_video",
+    arguments: { music: { track: "chill" } },
+  });
+  assert.strictEqual(res.isError, true);
+});
+
+test("generate_voice returns an audioId", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({
+    name: "pedra_generate_voice",
+    arguments: { text: "A bright, airy home in the heart of the city." },
+  });
+  assert.ok(!res.isError);
+  assert.match(textOf(res), /"audioId": "a1"/);
+});
+
+test("generate_voice_script returns script text", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({
+    name: "pedra_generate_voice_script",
+    arguments: { images: ["https://example.com/a.jpg"] },
+  });
+  assert.ok(!res.isError);
+  assert.match(textOf(res), /bright, airy home/);
+});
+
+test("music_library lists tracks", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({ name: "pedra_music_library", arguments: {} });
+  assert.ok(!res.isError);
+  assert.match(textOf(res), /cinematic|chill/);
+});
+
+test("list_projects returns projects", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({ name: "pedra_list_projects", arguments: {} });
+  assert.ok(!res.isError);
+  assert.match(textOf(res), /"projectId": "p1"/);
+});
+
+test("list_project_images returns photo URLs", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({ name: "pedra_list_project_images", arguments: { projectId: "p1" } });
+  assert.ok(!res.isError);
+  assert.match(textOf(res), /img\.pedra\.ai\/i1/);
+});
+
+test("create_project returns id + appUrl", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({ name: "pedra_create_project", arguments: { name: "New" } });
+  assert.ok(!res.isError);
+  assert.match(textOf(res), /projectId=p2/);
+});
+
+test("create_project requires nothing (name optional)", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({ name: "pedra_create_project", arguments: {} });
+  assert.ok(!res.isError);
+});
+
+test("add_images_to_project requires projectId + imageUrls", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({ name: "pedra_add_images_to_project", arguments: { projectId: "p1" } });
+  assert.strictEqual(res.isError, true);
+});
+
+test("add_images_to_project returns stored URLs", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({
+    name: "pedra_add_images_to_project",
+    arguments: { projectId: "p1", imageUrls: ["https://x/a.jpg"] },
+  });
+  assert.ok(!res.isError);
+  assert.match(textOf(res), /img\.pedra\.ai\/i9/);
 });
 
 test("API errors surface as tool errors, not crashes", async () => {

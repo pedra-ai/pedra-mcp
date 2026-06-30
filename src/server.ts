@@ -27,6 +27,14 @@ export type PedraClient = Pick<
   | "remove"
   | "blur"
   | "createVideo"
+  | "updateVideo"
+  | "generateVoiceScript"
+  | "generateVoice"
+  | "musicLibrary"
+  | "listProjects"
+  | "listProjectImages"
+  | "createProject"
+  | "addImagesToProject"
   | "credits"
   | "feedback"
 >;
@@ -240,6 +248,69 @@ const preserveOriginalFraming = z
     "Preserve the original framing/aspect ratio/resolution exactly (for verification verticals where the output must legally represent the captured photo). Defaults to false.",
   );
 
+// Shared video building blocks, reused by pedra_create_video and pedra_update_video.
+const videoImage = z.object({
+  imageUrl,
+  effect: z
+    .enum(["zoom-in", "zoom-out", "transition", "static"])
+    .describe('Animation for this image. Defaults to "zoom-in".')
+    .optional(),
+  secondImageUrl: z
+    .string()
+    .describe('Required when effect is "transition".')
+    .optional(),
+  subtitle: z.string().optional(),
+  title: z.string().optional(),
+  watermark: z
+    .object({
+      enabled: z.boolean().optional(),
+      position: z.string().optional(),
+      opacity: z.number().optional(),
+    })
+    .optional(),
+  characteristics: z.object({ enabled: z.boolean().optional() }).optional(),
+});
+
+const videoMusic = z
+  .object({
+    enabled: z.boolean().optional(),
+    track: z
+      .string()
+      .describe(
+        "Genre key from pedra_music_library (e.g. acoustic, chill, cinematic, electronic, upbeat).",
+      )
+      .optional(),
+  })
+  .optional();
+
+const videoVoice = z
+  .object({
+    enabled: z.boolean().optional(),
+    audioId: z
+      .string()
+      .describe(
+        "Id of a voiceover from pedra_generate_voice. Drives the narration and its synced subtitles.",
+      )
+      .optional(),
+    audioUrl: z.string().describe("Legacy alias for audioId.").optional(),
+    showSubtitles: z
+      .boolean()
+      .describe("Burn in word-synced subtitles. Defaults to true.")
+      .optional(),
+  })
+  .optional();
+
+const videoBranding = z
+  .object({
+    showWatermark: z.boolean().optional(),
+    showProfessionalPicture: z.boolean().optional(),
+  })
+  .optional();
+
+const propertyCharacteristics = z
+  .array(z.object({ label: z.string(), value: z.string() }))
+  .optional();
+
 /**
  * Build a Pedra MCP server with one tool per API endpoint. Each tool is a
  * single blocking call that returns the final asset URL(s); the API's 4xx
@@ -421,60 +492,19 @@ export function createServer(client: PedraClient): McpServer {
         "Create a property video from a list of images. Blocks server-side until the video is rendered (up to ~10 min) and returns the finished video URL inline.",
       inputSchema: {
         images: z
-          .array(
-            z.object({
-              imageUrl,
-              effect: z
-                .enum(["zoom-in", "zoom-out", "transition", "static"])
-                .describe('Animation for this image. Defaults to "zoom-in".')
-                .optional(),
-              secondImageUrl: z
-                .string()
-                .describe('Required when effect is "transition".')
-                .optional(),
-              subtitle: z.string().optional(),
-              title: z.string().optional(),
-              watermark: z
-                .object({
-                  enabled: z.boolean().optional(),
-                  position: z.string().optional(),
-                  opacity: z.number().optional(),
-                })
-                .optional(),
-              characteristics: z
-                .object({ enabled: z.boolean().optional() })
-                .optional(),
-            }),
-          )
+          .array(videoImage)
           .min(1)
           .describe("Ordered list of images that make up the video."),
-        music: z
-          .object({
-            enabled: z.boolean().optional(),
-            track: z.string().optional(),
-          })
-          .optional(),
-        voice: z
-          .object({
-            enabled: z.boolean().optional(),
-            audioUrl: z.string().optional(),
-          })
-          .optional(),
-        branding: z
-          .object({
-            showWatermark: z.boolean().optional(),
-            showProfessionalPicture: z.boolean().optional(),
-          })
-          .optional(),
+        music: videoMusic,
+        voice: videoVoice,
+        branding: videoBranding,
         endingTitle: z.string().optional(),
         endingSubtitle: z.string().optional(),
         isVertical: z
           .boolean()
           .describe("Force a vertical (9:16) video.")
           .optional(),
-        propertyCharacteristics: z
-          .array(z.object({ label: z.string(), value: z.string() }))
-          .optional(),
+        propertyCharacteristics,
       },
     },
     guard(async (a) => {
@@ -483,6 +513,202 @@ export function createServer(client: PedraClient): McpServer {
         message: res.message,
         videoId: res.videoId,
         videoUrl: res.videoUrl,
+      });
+    }),
+  );
+
+  register(
+    server,
+    "pedra_update_video",
+    {
+      title: "Edit existing video",
+      description:
+        "Edit an existing video (by videoId) without re-rendering unchanged clips — only new/changed photos re-animate and cost credits; reordering, music, voice, branding and text re-stitch for free. Omit `images` to change only audio/text/branding while keeping the current timeline. Omit `music`/`voice`/`branding`/ending text to leave them unchanged. Blocks until rendered and returns the new video URL.",
+      inputSchema: {
+        videoId: z
+          .string()
+          .describe("Id of the video to edit (from pedra_create_video)."),
+        images: z
+          .array(videoImage)
+          .describe(
+            "Full ordered image list to rebuild the timeline; matching photo+effect clips are reused. Omit to edit only audio/text and keep the current timeline.",
+          )
+          .optional(),
+        music: videoMusic,
+        voice: videoVoice,
+        branding: videoBranding,
+        endingTitle: z.string().optional(),
+        endingSubtitle: z.string().optional(),
+        isVertical: z
+          .boolean()
+          .describe("Force a vertical (9:16) video (only when images are sent).")
+          .optional(),
+        propertyCharacteristics,
+      },
+    },
+    guard(async (a) => {
+      const res = await client.updateVideo(withResolvedImages(a));
+      return ok({
+        message: res.message,
+        videoId: res.videoId,
+        videoUrl: res.videoUrl,
+      });
+    }),
+  );
+
+  register(
+    server,
+    "pedra_generate_voice_script",
+    {
+      title: "Generate voiceover script",
+      description:
+        "Write a short voiceover script from property photos (and optional facts). GPT-4o vision reads the images so the script reflects what's actually shown. Returns the script text — pass it to pedra_generate_voice.",
+      inputSchema: {
+        images: z
+          .array(z.union([imageUrl, z.object({ imageUrl })]))
+          .describe("Photos to base the script on (URLs or { imageUrl }).")
+          .optional(),
+        propertyCharacteristics,
+        language: z
+          .string()
+          .describe('Script language, e.g. "English", "Español". Defaults to English.')
+          .optional(),
+      },
+    },
+    guard(async (a) => {
+      const res = await client.generateVoiceScript(a);
+      return ok({ message: res.message, script: res.script });
+    }),
+  );
+
+  register(
+    server,
+    "pedra_generate_voice",
+    {
+      title: "Generate voiceover audio",
+      description:
+        "Render a voiceover from a script via text-to-speech. Returns an audioId — pass it to pedra_create_video / pedra_update_video as voice.audioId to attach the narration (with synced subtitles).",
+      inputSchema: {
+        text: z.string().describe("The script to narrate (max 1000 characters)."),
+        language: z
+          .string()
+          .describe('Voice language, e.g. "English", "Español". Defaults to English.')
+          .optional(),
+      },
+    },
+    guard(async (a) => {
+      const res = await client.generateVoice(a);
+      return ok({
+        message: res.message,
+        audioId: res.audioId,
+        audioUrl: res.audioUrl,
+        alignmentUrl: res.alignmentUrl,
+        duration: res.duration,
+      });
+    }),
+  );
+
+  register(
+    server,
+    "pedra_music_library",
+    {
+      title: "List music tracks",
+      description:
+        "List the background-music catalog: valid `music.track` values (genre keys) and the voice languages accepted by the voiceover tools. Read-only.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    guard(async () => {
+      const res = await client.musicLibrary();
+      return ok({
+        tracks: res.tracks,
+        variantsPerTrack: res.variantsPerTrack,
+        defaultTrack: res.defaultTrack,
+        voiceLanguages: res.voiceLanguages,
+      });
+    }),
+  );
+
+  register(
+    server,
+    "pedra_list_projects",
+    {
+      title: "List projects",
+      description:
+        "List the user's Pedra projects (id, name, photo count, and an appUrl to open each in Pedra). Use this to find photos already in the account — e.g. to build a video from a listing's photos.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    guard(async () => {
+      const res = await client.listProjects();
+      return ok({ projects: res.projects });
+    }),
+  );
+
+  register(
+    server,
+    "pedra_list_project_images",
+    {
+      title: "List project photos",
+      description:
+        "List a project's photos as img.pedra.ai URLs, ready to pass straight to pedra_create_video or the image-editing tools. Get the projectId from pedra_list_projects.",
+      inputSchema: {
+        projectId: z
+          .string()
+          .describe("The project's id (from pedra_list_projects)."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    guard(async (a) => {
+      const res = await client.listProjectImages(a);
+      return ok({ projectId: res.projectId, name: res.name, images: res.images });
+    }),
+  );
+
+  register(
+    server,
+    "pedra_create_project",
+    {
+      title: "Create project",
+      description:
+        "Create a new Pedra project. Returns its projectId and an appUrl. To add brand-new local photos (which can't be uploaded through chat), give the user the appUrl to open the project in Pedra and drop their photos in, then use pedra_list_project_images.",
+      inputSchema: {
+        name: z
+          .string()
+          .describe("Project name, e.g. the listing address.")
+          .optional(),
+      },
+    },
+    guard(async (a) => {
+      const res = await client.createProject(a);
+      return ok({ message: res.message, projectId: res.projectId, appUrl: res.appUrl });
+    }),
+  );
+
+  register(
+    server,
+    "pedra_add_images_to_project",
+    {
+      title: "Add photos to project",
+      description:
+        "Add photos to a project BY URL — the server fetches each URL and stores it, so any public https image URL (or a small data: URI) works. Returns the stored img.pedra.ai URLs. For local files on the user's device, direct them to the project's appUrl instead (chat can't transfer large local files).",
+      inputSchema: {
+        projectId: z
+          .string()
+          .describe("Target project id (from pedra_list_projects or pedra_create_project)."),
+        imageUrls: z
+          .array(z.string())
+          .describe("Up to 20 image URLs to fetch and add to the project."),
+      },
+    },
+    guard(async (a) => {
+      const res = await client.addImagesToProject(a);
+      return ok({
+        message: res.message,
+        projectId: res.projectId,
+        added: res.added,
+        failed: res.failed,
+        appUrl: res.appUrl,
       });
     }),
   );

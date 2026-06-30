@@ -49,6 +49,7 @@
     "build": "tsc",
     "clean": "rm -rf dist",
     "start": "node dist/index.js",
+    "start:remote": "node dist/remote.js",
     "prepublishOnly": "npm run clean && npm run build",
     "test": "npm run build && node --test test/*.test.js"
   },
