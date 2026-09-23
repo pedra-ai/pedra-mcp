@@ -239,9 +239,6 @@ const imageUrl = z
   .describe(
     "Source image: a public https:// URL, a data: URI, or an absolute path to a local image file (the file is read and inlined automatically).",
   );
-const creativity = z
-  .enum(["Low", "Medium", "High"])
-  .describe('Strength of the AI transformation. Defaults to "Medium".');
 const preserveOriginalFraming = z
   .boolean()
   .describe(
@@ -383,7 +380,6 @@ export function createServer(client: PedraClient): McpServer {
           .string()
           .describe('e.g. "Minimalist", "Scandinavian", "Modern".')
           .optional(),
-        creativity: creativity.optional(),
       },
     },
     guard(async (a) => imageOut(await client.furnish(withResolvedImages(a)))),
@@ -399,7 +395,6 @@ export function createServer(client: PedraClient): McpServer {
       inputSchema: {
         imageUrl,
         style: z.string().describe("Renovation style.").optional(),
-        creativity: creativity.optional(),
         furnish: z
           .union([
             z.boolean(),
