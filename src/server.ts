@@ -8,11 +8,13 @@ import {
   Pedra,
   PedraError,
   PedraApiError,
+  requestAccess as sdkRequestAccess,
+  getAccessStatus as sdkGetAccessStatus,
   type ImageResponse,
 } from "@pedra-ai/sdk";
 
 export const SERVER_NAME = "pedra";
-export const SERVER_VERSION = "0.2.0";
+export const SERVER_VERSION = "0.5.0";
 
 /** A Pedra-shaped client. Typed structurally so tests can inject a fake. */
 export type PedraClient = Pick<
@@ -35,9 +37,35 @@ export type PedraClient = Pick<
   | "listPropertyImages"
   | "createProperty"
   | "addImagesToProperty"
+  | "addLocalPanoramas"
+  | "createUploadLink"
+  | "createVirtualTour"
+  | "getVirtualTour"
+  | "listVirtualTours"
+  | "updateVirtualTour"
+  | "addVirtualTourScenes"
   | "credits"
   | "feedback"
 >;
+
+/** The agent-signup calls, injectable so tests don't hit the network. */
+export type AccessApi = {
+  requestAccess: typeof sdkRequestAccess;
+  getAccessStatus: typeof sdkGetAccessStatus;
+};
+
+export interface ServerOptions {
+  /** Signup calls. Defaults to the SDK's `requestAccess` / `getAccessStatus`. */
+  access?: AccessApi;
+  /** Builds the client once access is approved. Defaults to `new Pedra(apiKey)`. */
+  createClient?: (apiKey: string) => PedraClient;
+}
+
+/** What every account tool says until there's a key. */
+export const NO_API_KEY_MESSAGE =
+  "No API key yet: call pedra_request_access with the user's email. Pedra emails them a link to confirm " +
+  "(new users create their account there), then pedra_check_access returns the key and every tool works for " +
+  "the rest of this session. If they already have a key, set PEDRA_API_KEY in this MCP server's config instead.";
 
 type ToolResult = {
   content: { type: "text"; text: string }[];
@@ -55,7 +83,8 @@ function ok(data: unknown): ToolResult {
 function fail(err: unknown): ToolResult {
   let text: string;
   if (err instanceof PedraApiError) {
-    text = `Pedra API error${err.status ? ` (HTTP ${err.status})` : ""}: ${err.message}`;
+    const meta = [err.status ? `HTTP ${err.status}` : "", err.code ?? ""].filter(Boolean).join(", ");
+    text = `Pedra API error${meta ? ` (${meta})` : ""}: ${err.message}`;
   } else if (err instanceof PedraError) {
     text = err.message;
   } else {
@@ -106,17 +135,12 @@ const MIME_BY_EXT: Record<string, string> = {
 const MAX_LOCAL_IMAGE_BYTES = 40 * 1024 * 1024;
 
 /**
- * Resolve one image input into a value the Pedra API accepts. Remote URLs and
- * existing `data:` URIs pass through untouched; anything else is treated as a
- * path to a local file — the form a terminal or drag-and-drop inserts — and
- * read off disk into a base64 `data:` URI. This is what lets a user point a
- * tool at a local image instead of having to host it somewhere first.
+ * Turn a local path as a terminal or drag-and-drop inserts it into a plain
+ * filesystem path: strips wrapping quotes, unescapes "\ ", and expands
+ * `file://` URLs and `~`.
  */
-function resolveImageInput(value: string): string {
-  const raw = value.trim();
-  if (/^(https?:|data:)/i.test(raw)) return raw;
-
-  let path = raw;
+function normalizeLocalPath(value: string): string {
+  let path = value.trim();
   // Drag-and-drop and shells wrap or escape paths in a few predictable ways.
   if (
     (path.startsWith('"') && path.endsWith('"')) ||
@@ -132,7 +156,21 @@ function resolveImageInput(value: string): string {
       path = homedir() + path.slice(1);
     }
   }
+  return path;
+}
 
+/**
+ * Resolve one image input into a value the Pedra API accepts. Remote URLs and
+ * existing `data:` URIs pass through untouched; anything else is treated as a
+ * path to a local file — the form a terminal or drag-and-drop inserts — and
+ * read off disk into a base64 `data:` URI. This is what lets a user point a
+ * tool at a local image instead of having to host it somewhere first.
+ */
+function resolveImageInput(value: string): string {
+  const raw = value.trim();
+  if (/^(https?:|data:)/i.test(raw)) return raw;
+
+  const path = normalizeLocalPath(raw);
   const ext = extname(path).toLowerCase();
   const mime = MIME_BY_EXT[ext];
   if (!mime) {
@@ -237,7 +275,7 @@ function register(
 const imageUrl = z
   .string()
   .describe(
-    "Source image: a public https:// URL, a data: URI, or an absolute path to a local image file (the file is read and inlined automatically).",
+    "Source image: a public https:// URL, a data: URI, or an absolute path to a local image file on this computer (the file is read and inlined automatically). If the photo is on the user's device and can't be read from here (e.g. it's on their phone), get a link from pedra_create_upload_link.",
   );
 const preserveOriginalFraming = z
   .boolean()
@@ -308,15 +346,133 @@ const propertyCharacteristics = z
   .array(z.object({ label: z.string(), value: z.string() }))
   .optional();
 
+// Shared virtual-tour building blocks (same wording as the remote server).
+const imageType = z.enum(["photo", "360"]).optional();
+
+const tourLanguage = z
+  .enum(["en", "es", "fr", "de", "it", "pt"])
+  .describe('Language of the tour page and of AI room names. Defaults to "en".')
+  .optional();
+
+/**
+ * Agent signup tools, registered only when the server starts without an API
+ * key. `onApproved` swaps the session's client in, so the other tools work
+ * right away.
+ */
+function registerAccessTools(
+  server: McpServer,
+  options: ServerOptions,
+  onApproved: (apiKey: string) => void,
+): void {
+  const access: AccessApi = options.access ?? {
+    requestAccess: sdkRequestAccess,
+    getAccessStatus: sdkGetAccessStatus,
+  };
+
+  register(
+    server,
+    "pedra_request_access",
+    {
+      title: "Get a Pedra account",
+      description:
+        "This Pedra server has no API key yet. Use this when the user wants to use Pedra (photo editing, virtual staging, videos, 360° tours): ask for their email, then call this. Pedra emails them a link to confirm: a new user creates their account there (chooses a password), an existing user clicks Allow. Nothing is created until they click. Tell the user to check their inbox, then call pedra_check_access with the requestId.",
+      inputSchema: {
+        email: z.string().describe("The user's email address (ask them for it; don't guess)."),
+        agentName: z
+          .string()
+          .describe('Shown to the user in the email, e.g. "Claude Code". Defaults to this MCP client\'s name.')
+          .optional(),
+      },
+    },
+    guard(async (a) => {
+      const agentName =
+        a.agentName || server.server.getClientVersion()?.name || "Pedra MCP server";
+      const res = await access.requestAccess({ email: a.email, agentName });
+      return ok({
+        requestId: res.requestId,
+        status: res.status,
+        expiresAt: res.expiresAt,
+        message:
+          `Pedra emailed a confirmation link to ${a.email} (valid 30 minutes). Tell the user to open it and ` +
+          "confirm (new users choose a password there). Then call pedra_check_access with this requestId; " +
+          "if it's still pending, wait a few seconds and check again.",
+      });
+    }),
+  );
+
+  register(
+    server,
+    "pedra_check_access",
+    {
+      title: "Check Pedra account access",
+      description:
+        'Check whether the user confirmed the access request from pedra_request_access. "pending": they haven\'t clicked yet, check again in a few seconds. "approved": every Pedra tool works from now on in this session; show the user the result\'s message so they can keep their API key. "denied" or "expired": ask before requesting again.',
+      inputSchema: {
+        requestId: z.string().describe("The requestId from pedra_request_access."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    guard(async (a) => {
+      const res = await access.getAccessStatus(a.requestId);
+      if (res.status === "approved") {
+        onApproved(res.apiKey);
+        return ok({
+          status: "approved",
+          email: res.email,
+          newAccount: res.newAccount,
+          plan: res.plan,
+          creditsRemaining: res.creditsRemaining,
+          appUrl: res.appUrl,
+          ...(res.note ? { note: res.note } : {}),
+          apiKey: res.apiKey,
+          message:
+            "Access approved: every Pedra tool works now, for the rest of this session. The key is only kept in " +
+            "memory, so tell the user how to keep it: add PEDRA_API_KEY with this apiKey to the `env` block of " +
+            "this server's entry in their MCP client config (Claude Desktop extension: Settings > Extensions > " +
+            "Pedra > API key; Claude Code: `claude mcp add pedra -e PEDRA_API_KEY=<apiKey> -- npx -y @pedra-ai/mcp`). " +
+            "The key can also be found later in Settings at https://app.pedra.ai. Treat it like a password.",
+        });
+      }
+      const message = {
+        pending:
+          "The user hasn't confirmed yet. Ask them to open the link in the email from Pedra, then check again in a few seconds.",
+        denied: "The user declined access. Don't request it again unless they ask you to.",
+        expired:
+          "The request expired (links last 30 minutes). If the user still wants to use Pedra, call pedra_request_access again.",
+      }[res.status];
+      return ok({ status: res.status, message });
+    }),
+  );
+}
+
 /**
  * Build a Pedra MCP server with one tool per API endpoint. Each tool is a
  * single blocking call that returns the final asset URL(s); the API's 4xx
  * errors (insufficient credits, bad image, …) come back as tool errors.
+ *
+ * Without a client (no PEDRA_API_KEY), the server still starts: it adds
+ * `pedra_request_access` + `pedra_check_access` (agent signup), and every
+ * other tool answers with {@link NO_API_KEY_MESSAGE} until access is approved.
+ * The approved key then lives in memory for the session; it's never written
+ * to disk.
  */
-export function createServer(client: PedraClient): McpServer {
+export function createServer(
+  client?: PedraClient | null,
+  options: ServerOptions = {},
+): McpServer {
   const server = new McpServer({
     name: SERVER_NAME,
     version: SERVER_VERSION,
+  });
+
+  let current: PedraClient | null = client ?? null;
+  const api = (): PedraClient => {
+    if (!current) throw new PedraError(NO_API_KEY_MESSAGE);
+    return current;
+  };
+
+  if (!client) registerAccessTools(server, options, (apiKey) => {
+    current = (options.createClient ?? ((key: string) => new Pedra(key)))(apiKey);
   });
 
   register(
@@ -331,7 +487,7 @@ export function createServer(client: PedraClient): McpServer {
         preserveOriginalFraming: preserveOriginalFraming.optional(),
       },
     },
-    guard(async (a) => imageOut(await client.enhance(withResolvedImages(a)))),
+    guard(async (a) => imageOut(await api().enhance(withResolvedImages(a)))),
   );
 
   register(
@@ -347,7 +503,7 @@ export function createServer(client: PedraClient): McpServer {
       },
     },
     guard(async (a) =>
-      imageOut(await client.enhanceAndCorrectPerspective(withResolvedImages(a))),
+      imageOut(await api().enhanceAndCorrectPerspective(withResolvedImages(a))),
     ),
   );
 
@@ -360,7 +516,7 @@ export function createServer(client: PedraClient): McpServer {
         "Remove all furniture and objects from a room, leaving an empty space. Returns the emptied image URL.",
       inputSchema: { imageUrl },
     },
-    guard(async (a) => imageOut(await client.empty(withResolvedImages(a)))),
+    guard(async (a) => imageOut(await api().empty(withResolvedImages(a)))),
   );
 
   register(
@@ -382,7 +538,7 @@ export function createServer(client: PedraClient): McpServer {
           .optional(),
       },
     },
-    guard(async (a) => imageOut(await client.furnish(withResolvedImages(a)))),
+    guard(async (a) => imageOut(await api().furnish(withResolvedImages(a)))),
   );
 
   register(
@@ -407,7 +563,7 @@ export function createServer(client: PedraClient): McpServer {
         roomType: z.string().describe("Room type. Auto-detected if omitted.").optional(),
       },
     },
-    guard(async (a) => imageOut(await client.renovation(withResolvedImages(a)))),
+    guard(async (a) => imageOut(await api().renovation(withResolvedImages(a)))),
   );
 
   register(
@@ -424,7 +580,7 @@ export function createServer(client: PedraClient): McpServer {
           .describe("Natural-language description of the edit to apply."),
       },
     },
-    guard(async (a) => imageOut(await client.editViaPrompt(withResolvedImages(a)))),
+    guard(async (a) => imageOut(await api().editViaPrompt(withResolvedImages(a)))),
   );
 
   register(
@@ -439,7 +595,7 @@ export function createServer(client: PedraClient): McpServer {
         skyStyle: z.string().describe("Optional named sky style.").optional(),
       },
     },
-    guard(async (a) => imageOut(await client.sky(withResolvedImages(a)))),
+    guard(async (a) => imageOut(await api().sky(withResolvedImages(a)))),
   );
 
   register(
@@ -458,7 +614,7 @@ export function createServer(client: PedraClient): McpServer {
           ),
       },
     },
-    guard(async (a) => imageOut(await client.remove(withResolvedImages(a)))),
+    guard(async (a) => imageOut(await api().remove(withResolvedImages(a)))),
   );
 
   register(
@@ -475,7 +631,7 @@ export function createServer(client: PedraClient): McpServer {
           .describe('Labels/regions to blur, e.g. ["faces", "license plates"].'),
       },
     },
-    guard(async (a) => imageOut(await client.blur(withResolvedImages(a)))),
+    guard(async (a) => imageOut(await api().blur(withResolvedImages(a)))),
   );
 
   register(
@@ -503,7 +659,7 @@ export function createServer(client: PedraClient): McpServer {
       },
     },
     guard(async (a) => {
-      const res = await client.createVideo(withResolvedImages(a));
+      const res = await api().createVideo(withResolvedImages(a));
       return ok({
         message: res.message,
         videoId: res.videoId,
@@ -542,7 +698,7 @@ export function createServer(client: PedraClient): McpServer {
       },
     },
     guard(async (a) => {
-      const res = await client.updateVideo(withResolvedImages(a));
+      const res = await api().updateVideo(withResolvedImages(a));
       return ok({
         message: res.message,
         videoId: res.videoId,
@@ -571,7 +727,7 @@ export function createServer(client: PedraClient): McpServer {
       },
     },
     guard(async (a) => {
-      const res = await client.generateVoiceScript(a);
+      const res = await api().generateVoiceScript(a);
       return ok({ message: res.message, script: res.script });
     }),
   );
@@ -589,10 +745,16 @@ export function createServer(client: PedraClient): McpServer {
           .string()
           .describe('Voice language, e.g. "English", "Español". Defaults to English.')
           .optional(),
+        voiceId: z
+          .string()
+          .describe(
+            "Which voice narrates. Call pedra_music_library for the voices offered per language — a voice is only valid for the language it is listed under. Defaults to that language's first voice.",
+          )
+          .optional(),
       },
     },
     guard(async (a) => {
-      const res = await client.generateVoice(a);
+      const res = await api().generateVoice(a);
       return ok({
         message: res.message,
         audioId: res.audioId,
@@ -609,17 +771,18 @@ export function createServer(client: PedraClient): McpServer {
     {
       title: "List music tracks",
       description:
-        "List the background-music catalog: valid `music.track` values (genre keys) and the voice languages accepted by the voiceover tools. Read-only.",
+        "List the background-music catalog: valid `music.track` values (genre keys), plus the voice languages and the narration voices offered for each of them. Read-only.",
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
     guard(async () => {
-      const res = await client.musicLibrary();
+      const res = await api().musicLibrary();
       return ok({
         tracks: res.tracks,
         variantsPerTrack: res.variantsPerTrack,
         defaultTrack: res.defaultTrack,
         voiceLanguages: res.voiceLanguages,
+        voicesByLanguage: res.voicesByLanguage ?? [],
       });
     }),
   );
@@ -635,7 +798,7 @@ export function createServer(client: PedraClient): McpServer {
       annotations: { readOnlyHint: true },
     },
     guard(async () => {
-      const res = await client.listProperties();
+      const res = await api().listProperties();
       return ok({ properties: res.properties });
     }),
   );
@@ -646,16 +809,19 @@ export function createServer(client: PedraClient): McpServer {
     {
       title: "List property photos",
       description:
-        "List a property's photos as img.pedra.ai URLs, ready to pass straight to pedra_create_video or the image-editing tools. Get the propertyId from pedra_list_properties.",
+        'List the photos in a Pedra property as img.pedra.ai URLs, ready to pass straight to pedra_create_video or the image-editing tools. Get the propertyId from pedra_list_properties. Pass type "360" to list its 360° photos instead (their imageIds are the scenes of a virtual tour).',
       inputSchema: {
         propertyId: z
           .string()
           .describe("The property's id (from pedra_list_properties)."),
+        type: imageType.describe(
+          'Which images to list: regular photos ("photo", the default) or 360° photos ("360").',
+        ),
       },
       annotations: { readOnlyHint: true },
     },
     guard(async (a) => {
-      const res = await client.listPropertyImages(a);
+      const res = await api().listPropertyImages(a);
       return ok({ propertyId: res.propertyId, name: res.name, images: res.images });
     }),
   );
@@ -666,7 +832,7 @@ export function createServer(client: PedraClient): McpServer {
     {
       title: "Create property",
       description:
-        "Create a new Pedra property. Returns its propertyId and an appUrl. To add brand-new local photos (which can't be uploaded through chat), give the user the appUrl to open the property in Pedra and drop their photos in, then use pedra_list_property_images.",
+        "Create a new Pedra property. Returns its propertyId and an appUrl. To add photos that are on the user's device, pedra_create_upload_link is simpler (no login); or give the user the appUrl to open the property in Pedra and drop their photos in, then use pedra_list_property_images.",
       inputSchema: {
         name: z
           .string()
@@ -675,7 +841,7 @@ export function createServer(client: PedraClient): McpServer {
       },
     },
     guard(async (a) => {
-      const res = await client.createProperty(a);
+      const res = await api().createProperty(a);
       return ok({ message: res.message, propertyId: res.propertyId, appUrl: res.appUrl });
     }),
   );
@@ -686,25 +852,282 @@ export function createServer(client: PedraClient): McpServer {
     {
       title: "Add photos to property",
       description:
-        "Add photos to a property BY URL — the server fetches each URL and stores it, so any public https image URL (or a small data: URI) works. Returns the stored img.pedra.ai URLs. For local files on the user's device, direct them to the property's appUrl instead (chat can't transfer large local files).",
+        'Add photos to a property by URL (the server fetches each one, so any public https image URL or small data: URI works). Returns the stored img.pedra.ai URLs to use with the editing, video and tour tools. For photos on the user\'s device, use pedra_create_upload_link instead. Pass type "360" for 360° photos (checked to be 2:1 equirectangular), which can then become a virtual tour. (With this local server, 360° photo files on this computer can go through pedra_add_local_panoramas instead.)',
       inputSchema: {
         propertyId: z
           .string()
           .describe("Target property id (from pedra_list_properties or pedra_create_property)."),
         imageUrls: z
           .array(z.string())
-          .describe("Up to 20 image URLs to fetch and add to the property."),
+          .describe(
+            'Image URLs to fetch and add to the property: up to 20 photos, or up to 10 when type is "360".',
+          ),
+        type: imageType.describe(
+          'What the images are: regular photos ("photo", the default) or 360° photos ("360").',
+        ),
       },
     },
     guard(async (a) => {
-      const res = await client.addImagesToProperty(a);
+      const res = await api().addImagesToProperty(a);
       return ok({
         message: res.message,
         propertyId: res.propertyId,
+        type: res.type,
         added: res.added,
         failed: res.failed,
         appUrl: res.appUrl,
       });
+    }),
+  );
+
+  register(
+    server,
+    "pedra_add_local_panoramas",
+    {
+      title: "Add local 360° photos to property",
+      description:
+        "LOCAL-ONLY TOOL (this Pedra MCP server runs on the user's own computer, so it can read files from its disk). Upload 360° photo files (2:1 equirectangular JPEG, PNG or WebP) from absolute local paths into a property, in the order given — that order becomes the walking order when you then call pedra_create_virtual_tour with just the propertyId. Files are sent in batches (10 per call, under the 50 MB request limit); a file over ~33 MB can't be sent this way — use pedra_create_upload_link for those. Prefer this over pedra_create_upload_link whenever the 360° photos are files on this computer. Returns the added photos (imageIds are scene ids) and any that failed, each with its path.",
+      inputSchema: {
+        propertyId: z
+          .string()
+          .describe("Target property id (from pedra_list_properties or pedra_create_property)."),
+        paths: z
+          .array(z.string())
+          .min(1)
+          .describe(
+            "Absolute paths to 360° photo files on this computer, in walking order (file:// URLs and ~ are accepted).",
+          ),
+      },
+      annotations: { openWorldHint: false },
+    },
+    guard(async (a) => {
+      const res = await api().addLocalPanoramas(
+        a.propertyId,
+        (a.paths as string[]).map(normalizeLocalPath),
+      );
+      return ok({
+        message: res.message,
+        propertyId: res.propertyId,
+        type: res.type,
+        added: res.added,
+        failed: res.failed,
+        appUrl: res.appUrl,
+      });
+    }),
+  );
+
+  register(
+    server,
+    "pedra_create_upload_link",
+    {
+      title: "Create photo upload link",
+      description:
+        'Get a link where the user (or their photographer) uploads photos from their phone or computer into a property. No login, valid 24 hours. Use this whenever the photos are files on the user\'s device that weren\'t attached to the chat: for editing, videos or virtual tours. Regular photos and 360° photos both work (360° photos are recognised automatically); pass type "360" for a virtual tour so anything else is refused. Creates the property if no propertyId is given. Give the user the uploadUrl, wait until they say they\'re done, then use pedra_list_property_images (type "360" for 360° photos), or pedra_create_virtual_tour with the propertyId. (With this local server, files on this computer can also be passed directly: a local path as imageUrl, or pedra_add_local_panoramas for 360° photos.)',
+      inputSchema: {
+        propertyId: z
+          .string()
+          .describe("Property to upload into (from pedra_list_properties). Omit to create a new one.")
+          .optional(),
+        name: z
+          .string()
+          .describe("Name for the new property, e.g. the listing address. Ignored when propertyId is given.")
+          .optional(),
+        type: z
+          .enum(["any", "360"])
+          .describe('"any" (default) takes photos and 360° photos; "360" only takes 360° photos.')
+          .optional(),
+        language: tourLanguage,
+      },
+      annotations: { openWorldHint: false },
+    },
+    guard(async (a) => {
+      const res = await api().createUploadLink(a);
+      const { raw, ...rest } = res;
+      return ok(rest);
+    }),
+  );
+
+  register(
+    server,
+    "pedra_create_virtual_tour",
+    {
+      title: "Create virtual tour",
+      description:
+        'Build a hosted 360° virtual tour: the rooms are named and linked with navigation points by AI, and you get a shareable link and embed code. Pass the 360° photos as scenes (URLs, or imageIds of 360° photos already in the property) in the order someone would walk through the home, or just a propertyId to use all its 360° photos. Linking: "sequential" (default) links each room to the next and costs max(3, ceil(rooms/3)) credits; "smart" lets AI work out which rooms connect (slower, 5-160 credits by room count); "none" is free. Returns a tourId immediately — the build takes about 10 seconds per room, so poll pedra_get_virtual_tour until status is "ready". One tour per property.',
+      inputSchema: {
+        scenes: z
+          .array(
+            z.object({
+              imageUrl: z
+                .string()
+                .describe("A 360° photo (2:1 equirectangular): public https URL or data: URI.")
+                .optional(),
+              imageId: z
+                .string()
+                .describe('Id of a 360° photo already in the property (from pedra_list_property_images with type "360").')
+                .optional(),
+              name: z
+                .string()
+                .describe('Room name shown in the tour, e.g. "Kitchen". Omit and AI names the room.')
+                .optional(),
+            }),
+          )
+          .describe("The rooms in walking order. Omit to use every 360° photo in propertyId.")
+          .optional(),
+        propertyId: z
+          .string()
+          .describe("Property the tour belongs to. Omit to create a new property.")
+          .optional(),
+        name: z.string().describe("Tour title, e.g. the listing address.").optional(),
+        linking: z
+          .enum(["sequential", "smart", "none"])
+          .describe('How rooms get connected. Defaults to "sequential".')
+          .optional(),
+        language: tourLanguage,
+      },
+      annotations: { openWorldHint: true },
+    },
+    guard(async (a) => {
+      const { raw, ...rest } = await api().createVirtualTour(a);
+      return ok(rest);
+    }),
+  );
+
+  register(
+    server,
+    "pedra_get_virtual_tour",
+    {
+      title: "Check virtual tour",
+      description:
+        'Get a virtual tour: status ("processing", "ready" or "failed", with the reason), the shareable tourUrl, an embedCode iframe for a website, and its scenes and navigation links. Poll this after pedra_create_virtual_tour or pedra_add_virtual_tour_scenes. Read-only.',
+      inputSchema: {
+        tourId: z
+          .string()
+          .describe("Id from pedra_create_virtual_tour or pedra_list_virtual_tours."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    guard(async (a) => {
+      const { raw, ...rest } = await api().getVirtualTour(a.tourId);
+      return ok(rest);
+    }),
+  );
+
+  register(
+    server,
+    "pedra_list_virtual_tours",
+    {
+      title: "List virtual tours",
+      description:
+        "List the account's virtual tours (newest first) with status, share link and room count. Optionally only one property's. Read-only.",
+      inputSchema: {
+        propertyId: z.string().describe("Only this property's tour.").optional(),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    guard(async (a) => {
+      const res = await api().listVirtualTours(a);
+      return ok({ tours: res.tours });
+    }),
+  );
+
+  register(
+    server,
+    "pedra_update_virtual_tour",
+    {
+      title: "Edit virtual tour",
+      description:
+        "Change a finished virtual tour in place: rename it or its rooms, reorder rooms (the first one is where the tour opens), remove rooms, replace its navigation links, or change how the navigation points look. Free and instant. The tour's public link shows the change right away. Get sceneIds from pedra_get_virtual_tour.",
+      inputSchema: {
+        tourId: z.string().describe("The tour to change."),
+        name: z.string().describe("New tour title.").optional(),
+        sceneNames: z
+          .record(z.string())
+          .describe('New room names, as { sceneId: "Kitchen" }.')
+          .optional(),
+        sceneOrder: z
+          .array(z.string())
+          .describe("Every sceneId of the tour in the new order. The first one opens the tour.")
+          .optional(),
+        removeScenes: z
+          .array(z.string())
+          .describe("sceneIds to take out of the tour (the photos stay in the property). Their links go too.")
+          .optional(),
+        links: z
+          .array(
+            z.object({
+              fromSceneId: z.string(),
+              toSceneId: z.string(),
+              yaw: z
+                .number()
+                .describe("Horizontal angle of the navigation point in the from-scene, -180 to 180 (0 = centre of the photo)."),
+              pitch: z
+                .number()
+                .describe("Vertical angle, -90 to 90 (0 = horizon, the default).")
+                .optional(),
+            }),
+          )
+          .describe("Replaces ALL navigation links. Each is one direction; add the return link separately.")
+          .optional(),
+        navigationStyle: z
+          .enum(["white", "blue"])
+          .describe("Look of the navigation points.")
+          .optional(),
+        navigationSize: z
+          .enum(["small", "medium", "large"])
+          .describe("Size of the navigation points.")
+          .optional(),
+        showLabels: z
+          .boolean()
+          .describe("Always show room names next to the navigation points.")
+          .optional(),
+        language: tourLanguage,
+      },
+      annotations: { destructiveHint: true },
+    },
+    guard(async (a) => {
+      const { raw, ...rest } = await api().updateVirtualTour(a);
+      return ok(rest);
+    }),
+  );
+
+  register(
+    server,
+    "pedra_add_virtual_tour_scenes",
+    {
+      title: "Add rooms to virtual tour",
+      description:
+        'Add rooms to the end of an existing virtual tour. With "sequential" linking (default) only the new stretch is linked: the last existing room to the first new one, then each new room to the next. That costs max(3, ceil(new rooms/3)) credits; "none" is free. The tour stays live while this runs; poll pedra_get_virtual_tour until status is "ready".',
+      inputSchema: {
+        tourId: z.string().describe("The tour to extend."),
+        scenes: z
+          .array(
+            z.object({
+              imageUrl: z
+                .string()
+                .describe("A 360° photo: public https URL or data: URI.")
+                .optional(),
+              imageId: z
+                .string()
+                .describe("Id of a 360° photo already in the tour's property.")
+                .optional(),
+              name: z
+                .string()
+                .describe("Room name. Omit and AI names the room.")
+                .optional(),
+            }),
+          )
+          .describe("The new rooms, in walking order."),
+        linking: z
+          .enum(["sequential", "none"])
+          .describe('Defaults to "sequential".')
+          .optional(),
+      },
+      annotations: { openWorldHint: true },
+    },
+    guard(async (a) => {
+      const { raw, ...rest } = await api().addVirtualTourScenes(a);
+      return ok(rest);
     }),
   );
 
@@ -719,7 +1142,7 @@ export function createServer(client: PedraClient): McpServer {
       annotations: { readOnlyHint: true },
     },
     guard(async () => {
-      const res = await client.credits();
+      const res = await api().credits();
       return ok({ plan: res.plan, creditsRemaining: res.creditsRemaining });
     }),
   );
@@ -752,7 +1175,7 @@ export function createServer(client: PedraClient): McpServer {
       },
     },
     guard(async (a) => {
-      const res = await client.feedback(a);
+      const res = await api().feedback(a);
       const { raw, ...rest } = res;
       return ok(rest);
     }),

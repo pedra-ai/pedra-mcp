@@ -27,9 +27,30 @@ const EXPECTED_TOOLS = [
   "pedra_list_property_images",
   "pedra_create_property",
   "pedra_add_images_to_property",
+  "pedra_add_local_panoramas",
+  "pedra_create_upload_link",
+  "pedra_create_virtual_tour",
+  "pedra_get_virtual_tour",
+  "pedra_list_virtual_tours",
+  "pedra_update_virtual_tour",
+  "pedra_add_virtual_tour_scenes",
   "pedra_credits",
   "pedra_feedback",
 ];
+
+const TOUR = {
+  tourId: "t1",
+  propertyId: "p1",
+  name: "Calle Mayor 12",
+  status: "ready",
+  tourUrl: "https://app.pedra.ai/virtual-tour/t1",
+  embedCode: "<iframe src=\"https://app.pedra.ai/virtual-tour/t1\"></iframe>",
+  shareable: true,
+  sceneCount: 2,
+  linkCount: 2,
+  scenes: [{ sceneId: "s1", name: "Entrance" }],
+  links: [{ fromSceneId: "s1", toSceneId: "s2", yaw: -18, pitch: 0 }],
+};
 
 function fakeClient(overrides = {}) {
   const img = (url) => ({ message: "ok", url, urls: [url], raw: {} });
@@ -99,6 +120,29 @@ function fakeClient(overrides = {}) {
       appUrl: "https://app.pedra.ai/?propertyId=p1",
       raw: {},
     }),
+    addLocalPanoramas: async (propertyId, paths) => ({
+      message: `Added ${paths.length} 360° photo(s)`,
+      propertyId,
+      type: "360",
+      added: paths.map((p, i) => ({ imageId: `s${i + 1}`, url: `https://img.pedra.ai/s${i + 1}`, aspectRatio: 2, path: p })),
+      failed: [],
+      appUrl: "https://app.pedra.ai/?projectId=p1",
+      raw: undefined,
+    }),
+    createUploadLink: async () => ({
+      message: "Send this link",
+      uploadUrl: "https://app.pedra.ai/upload/tok",
+      propertyId: "p9",
+      propertyName: "Calle Mayor 12",
+      expiresAt: "2026-10-01T15:26:30.687Z",
+      appUrl: "https://app.pedra.ai/?projectId=p9",
+      raw: {},
+    }),
+    createVirtualTour: async () => ({ ...TOUR, status: "processing", progress: { stage: "queued" }, creditsCost: 3, raw: {} }),
+    getVirtualTour: async () => ({ ...TOUR, raw: {} }),
+    listVirtualTours: async () => ({ tours: [{ tourId: "t1", status: "ready" }], raw: {} }),
+    updateVirtualTour: async () => ({ ...TOUR, name: "Renamed", raw: {} }),
+    addVirtualTourScenes: async () => ({ ...TOUR, status: "processing", addedScenes: [{ sceneId: "s3" }], raw: {} }),
     credits: async () => ({ plan: "pro", creditsRemaining: 42, raw: {} }),
     feedback: async () => ({ message: "thanks", creditedBack: true, raw: {} }),
     ...overrides,
@@ -124,7 +168,7 @@ function textOf(result) {
     .join("\n");
 }
 
-test("exposes exactly the 12 endpoint tools", async () => {
+test("exposes exactly the expected tools", async () => {
   const mcp = await connect(fakeClient());
   const { tools } = await mcp.listTools();
   const names = tools.map((t) => t.name).sort();
@@ -377,5 +421,447 @@ test("an unsupported local file type is rejected with a clear message", async ()
     assert.match(textOf(res), /Unsupported local image type/);
   } finally {
     fs.rmSync(file, { force: true });
+  }
+});
+
+// --- virtual tours -----------------------------------------------------------
+
+function recordingClient(names) {
+  const seen = {};
+  const overrides = {};
+  const base = fakeClient();
+  for (const name of names) {
+    overrides[name] = async (...args) => {
+      seen[name] = args;
+      return base[name](...args);
+    };
+  }
+  return { client: fakeClient(overrides), seen };
+}
+
+test("tour tools carry the remote server's annotations", async () => {
+  const mcp = await connect(fakeClient());
+  const { tools } = await mcp.listTools();
+  const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
+  assert.strictEqual(byName.pedra_get_virtual_tour.annotations.readOnlyHint, true);
+  assert.strictEqual(byName.pedra_list_virtual_tours.annotations.readOnlyHint, true);
+  assert.strictEqual(byName.pedra_update_virtual_tour.annotations.destructiveHint, true);
+  assert.strictEqual(byName.pedra_create_virtual_tour.annotations.readOnlyHint, false);
+  assert.match(byName.pedra_add_local_panoramas.description, /LOCAL-ONLY/);
+  // `type` is exposed on both property-image tools.
+  assert.deepStrictEqual(byName.pedra_list_property_images.inputSchema.properties.type.enum, ["photo", "360"]);
+  assert.deepStrictEqual(byName.pedra_add_images_to_property.inputSchema.properties.type.enum, ["photo", "360"]);
+  assert.deepStrictEqual(byName.pedra_update_virtual_tour.inputSchema.required, ["tourId"]);
+  assert.deepStrictEqual([...byName.pedra_add_virtual_tour_scenes.inputSchema.required].sort(), ["scenes", "tourId"]);
+});
+
+test("list_property_images forwards type 360", async () => {
+  const { client, seen } = recordingClient(["listPropertyImages"]);
+  const mcp = await connect(client);
+  const res = await mcp.callTool({ name: "pedra_list_property_images", arguments: { propertyId: "p1", type: "360" } });
+  assert.ok(!res.isError, textOf(res));
+  assert.strictEqual(seen.listPropertyImages[0].type, "360");
+});
+
+test("add_images_to_property rejects an unknown type", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({
+    name: "pedra_add_images_to_property",
+    arguments: { propertyId: "p1", imageUrls: ["https://x/a.jpg"], type: "panorama" },
+  });
+  assert.strictEqual(res.isError, true);
+});
+
+test("create_virtual_tour returns the tourId and strips raw", async () => {
+  const { client, seen } = recordingClient(["createVirtualTour"]);
+  const mcp = await connect(client);
+  const res = await mcp.callTool({
+    name: "pedra_create_virtual_tour",
+    arguments: { name: "Calle Mayor 12", scenes: [{ imageUrl: "https://x/pano.jpg", name: "Entrance" }], linking: "smart", language: "es" },
+  });
+  assert.ok(!res.isError, textOf(res));
+  assert.strictEqual(seen.createVirtualTour[0].linking, "smart");
+  assert.strictEqual(seen.createVirtualTour[0].scenes[0].name, "Entrance");
+  const out = JSON.parse(textOf(res));
+  assert.strictEqual(out.tourId, "t1");
+  assert.strictEqual(out.status, "processing");
+  assert.ok(!("raw" in out));
+});
+
+test("create_virtual_tour with only a propertyId is valid", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({ name: "pedra_create_virtual_tour", arguments: { propertyId: "p1" } });
+  assert.ok(!res.isError, textOf(res));
+});
+
+test("create_virtual_tour rejects an unknown language", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({ name: "pedra_create_virtual_tour", arguments: { propertyId: "p1", language: "nl" } });
+  assert.strictEqual(res.isError, true);
+});
+
+test("get_virtual_tour returns the share link and embed code", async () => {
+  const { client, seen } = recordingClient(["getVirtualTour"]);
+  const mcp = await connect(client);
+  const res = await mcp.callTool({ name: "pedra_get_virtual_tour", arguments: { tourId: "t1" } });
+  assert.ok(!res.isError);
+  assert.strictEqual(seen.getVirtualTour[0], "t1");
+  assert.match(textOf(res), /virtual-tour\/t1/);
+  assert.match(textOf(res), /iframe/);
+});
+
+test("get_virtual_tour requires a tourId", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({ name: "pedra_get_virtual_tour", arguments: {} });
+  assert.strictEqual(res.isError, true);
+});
+
+test("list_virtual_tours returns tours", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({ name: "pedra_list_virtual_tours", arguments: {} });
+  assert.ok(!res.isError);
+  assert.match(textOf(res), /"tourId": "t1"/);
+});
+
+test("update_virtual_tour forwards sceneNames and links", async () => {
+  const { client, seen } = recordingClient(["updateVirtualTour"]);
+  const mcp = await connect(client);
+  const res = await mcp.callTool({
+    name: "pedra_update_virtual_tour",
+    arguments: {
+      tourId: "t1",
+      sceneNames: { s1: "Kitchen" },
+      links: [{ fromSceneId: "s1", toSceneId: "s2", yaw: 90 }],
+      navigationStyle: "blue",
+    },
+  });
+  assert.ok(!res.isError, textOf(res));
+  assert.deepStrictEqual(seen.updateVirtualTour[0].sceneNames, { s1: "Kitchen" });
+  assert.strictEqual(seen.updateVirtualTour[0].links[0].yaw, 90);
+  assert.match(textOf(res), /Renamed/);
+});
+
+test("update_virtual_tour rejects a link without yaw", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({
+    name: "pedra_update_virtual_tour",
+    arguments: { tourId: "t1", links: [{ fromSceneId: "s1", toSceneId: "s2" }] },
+  });
+  assert.strictEqual(res.isError, true);
+});
+
+test("add_virtual_tour_scenes returns the added scenes", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({
+    name: "pedra_add_virtual_tour_scenes",
+    arguments: { tourId: "t1", scenes: [{ imageId: "s3" }] },
+  });
+  assert.ok(!res.isError, textOf(res));
+  assert.match(textOf(res), /"sceneId": "s3"/);
+});
+
+test("create_upload_link returns the upload URL", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({ name: "pedra_create_upload_link", arguments: { name: "Calle Mayor 12" } });
+  assert.ok(!res.isError);
+  assert.match(textOf(res), /app\.pedra\.ai\/upload\/tok/);
+});
+
+test("add_local_panoramas normalizes paths and calls the SDK helper", async () => {
+  const { client, seen } = recordingClient(["addLocalPanoramas"]);
+  const mcp = await connect(client);
+  const res = await mcp.callTool({
+    name: "pedra_add_local_panoramas",
+    arguments: { propertyId: "p1", paths: ["'/tmp/a b.jpg'", "file:///tmp/c.jpg", "~/d.jpg"] },
+  });
+  assert.ok(!res.isError, textOf(res));
+  assert.strictEqual(seen.addLocalPanoramas[0], "p1");
+  assert.deepStrictEqual(seen.addLocalPanoramas[1], ["/tmp/a b.jpg", "/tmp/c.jpg", path.join(os.homedir(), "d.jpg")]);
+  assert.match(textOf(res), /"type": "360"/);
+});
+
+test("add_local_panoramas requires at least one path", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({ name: "pedra_add_local_panoramas", arguments: { propertyId: "p1", paths: [] } });
+  assert.strictEqual(res.isError, true);
+});
+
+test("tour API errors (409 tour_exists) surface as tool errors", async () => {
+  const mcp = await connect(
+    fakeClient({
+      createVirtualTour: async () => {
+        throw new PedraApiError("This property already has a virtual tour", 409, { code: "tour_exists", tourId: "t1" });
+      },
+    }),
+  );
+  const res = await mcp.callTool({ name: "pedra_create_virtual_tour", arguments: { propertyId: "p1" } });
+  assert.strictEqual(res.isError, true);
+  assert.match(textOf(res), /409/);
+  assert.match(textOf(res), /already has a virtual tour/);
+});
+
+test("add_local_panoramas end to end with the real SDK sends base64 360 photos", async () => {
+  const { Pedra } = require("@pedra-ai/sdk");
+  const file = path.join(os.tmpdir(), `pedra-mcp-pano-${process.pid}.jpg`);
+  fs.writeFileSync(file, Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+  const calls = [];
+  const fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ propertyId: "p1", type: "360", added: [{ imageId: "s1", url: "https://img.pedra.ai/s1", aspectRatio: 2 }], failed: [] }),
+    };
+  };
+  const mcp = await connect(new Pedra("k", { fetch }));
+  try {
+    const res = await mcp.callTool({ name: "pedra_add_local_panoramas", arguments: { propertyId: "p1", paths: [file] } });
+    assert.ok(!res.isError, textOf(res));
+    assert.strictEqual(calls.length, 1);
+    assert.match(calls[0].url, /\/add_images_to_property$/);
+    assert.strictEqual(calls[0].body.type, "360");
+    assert.match(calls[0].body.imageUrls[0], /^data:image\/jpeg;base64,/);
+    assert.match(textOf(res), new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
+});
+
+// --- upload links: type ------------------------------------------------------
+
+test("create_upload_link forwards type and returns type + maxFiles", async () => {
+  let got;
+  const mcp = await connect(
+    fakeClient({
+      createUploadLink: async (a) => {
+        got = a;
+        return { uploadUrl: "https://app.pedra.ai/upload/tok", propertyId: "p9", type: a.type, maxFiles: 100, raw: {} };
+      },
+    }),
+  );
+  const res = await mcp.callTool({ name: "pedra_create_upload_link", arguments: { propertyId: "p9", type: "360" } });
+  assert.ok(!res.isError, textOf(res));
+  assert.deepStrictEqual(got, { propertyId: "p9", type: "360" });
+  const out = JSON.parse(textOf(res));
+  assert.strictEqual(out.type, "360");
+  assert.strictEqual(out.maxFiles, 100);
+  assert.strictEqual(out.raw, undefined);
+});
+
+test("create_upload_link rejects an unknown type", async () => {
+  const mcp = await connect(fakeClient());
+  const res = await mcp.callTool({ name: "pedra_create_upload_link", arguments: { type: "video" } });
+  assert.strictEqual(res.isError, true);
+});
+
+test("create_upload_link mirrors the remote description (photos too, type param)", async () => {
+  const mcp = await connect(fakeClient());
+  const { tools } = await mcp.listTools();
+  const tool = tools.find((t) => t.name === "pedra_create_upload_link");
+  assert.match(tool.description, /Regular photos and 360° photos both work/);
+  assert.deepStrictEqual(tool.inputSchema.properties.type.enum, ["any", "360"]);
+  const enhance = tools.find((t) => t.name === "pedra_enhance");
+  assert.match(enhance.inputSchema.properties.imageUrl.description, /pedra_create_upload_link/);
+  assert.doesNotMatch(enhance.inputSchema.properties.imageUrl.description, /imageFile/);
+  assert.strictEqual(enhance.inputSchema.properties.imageFile, undefined);
+  const add = tools.find((t) => t.name === "pedra_add_images_to_property");
+  assert.strictEqual(add.inputSchema.properties.files, undefined);
+});
+
+test("upload limit errors show the HTTP status and code", async () => {
+  const mcp = await connect(
+    fakeClient({
+      addImagesToProperty: async () => {
+        throw new PedraApiError("Daily upload limit reached", 429, { error: "Daily upload limit reached", code: "upload_limit" });
+      },
+    }),
+  );
+  const res = await mcp.callTool({ name: "pedra_add_images_to_property", arguments: { propertyId: "p1", imageUrls: ["https://x/1.jpg"] } });
+  assert.strictEqual(res.isError, true);
+  assert.match(textOf(res), /HTTP 429, upload_limit/);
+});
+
+// --- no API key: agent signup --------------------------------------------------
+
+const { NO_API_KEY_MESSAGE } = require("../dist/server.js");
+
+function fakeAccess(statuses, requestAccessImpl) {
+  const calls = { request: [], status: [] };
+  let i = 0;
+  return {
+    calls,
+    requestAccess: async (params) => {
+      calls.request.push(params);
+      if (requestAccessImpl) return requestAccessImpl(params);
+      return { requestId: "r1", status: "pending", expiresAt: "2026-09-30T12:30:00.000Z", pollAfterSeconds: 5, message: "sent", raw: {} };
+    },
+    getAccessStatus: async (requestId) => {
+      calls.status.push(requestId);
+      return { raw: {}, ...statuses[Math.min(i++, statuses.length - 1)] };
+    },
+  };
+}
+
+async function connectKeyless(access, createClient) {
+  const server = createServer(null, { access, createClient });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const mcp = new Client({ name: "test-agent", version: "0.0.0" });
+  await Promise.all([server.connect(serverTransport), mcp.connect(clientTransport)]);
+  return mcp;
+}
+
+const APPROVED = {
+  status: "approved",
+  apiKey: "new-key",
+  email: "ana@agency.com",
+  newAccount: true,
+  plan: "free",
+  creditsRemaining: 0,
+  appUrl: "https://app.pedra.ai",
+  note: "This account has no credits yet.",
+};
+
+test("without a key: exposes every tool plus the two access tools", async () => {
+  const mcp = await connectKeyless(fakeAccess([]));
+  const { tools } = await mcp.listTools();
+  assert.deepStrictEqual(
+    tools.map((t) => t.name).sort(),
+    [...EXPECTED_TOOLS, "pedra_request_access", "pedra_check_access"].sort(),
+  );
+});
+
+test("with a key: the access tools are not listed", async () => {
+  const mcp = await connect(fakeClient());
+  const { tools } = await mcp.listTools();
+  assert.ok(!tools.some((t) => t.name === "pedra_request_access" || t.name === "pedra_check_access"));
+});
+
+test("without a key: other tools return a clear no-key error", async () => {
+  const mcp = await connectKeyless(fakeAccess([]));
+  const res = await mcp.callTool({ name: "pedra_credits", arguments: {} });
+  assert.strictEqual(res.isError, true);
+  assert.strictEqual(textOf(res), NO_API_KEY_MESSAGE);
+  assert.match(textOf(res), /No API key yet: call pedra_request_access with the user's email/);
+  // A local path isn't even read before the key check.
+  const res2 = await mcp.callTool({ name: "pedra_enhance", arguments: { imageUrl: "/nope/missing.jpg" } });
+  assert.strictEqual(res2.isError, true);
+  assert.match(textOf(res2), /No API key yet/);
+});
+
+test("request_access sends the email and defaults agentName to the MCP client's name", async () => {
+  const access = fakeAccess([]);
+  const mcp = await connectKeyless(access);
+  const res = await mcp.callTool({ name: "pedra_request_access", arguments: { email: "ana@agency.com" } });
+  assert.ok(!res.isError, textOf(res));
+  assert.deepStrictEqual(access.calls.request, [{ email: "ana@agency.com", agentName: "test-agent" }]);
+  const out = JSON.parse(textOf(res));
+  assert.strictEqual(out.requestId, "r1");
+  assert.match(out.message, /pedra_check_access/);
+});
+
+test("request_access passes an explicit agentName and requires an email", async () => {
+  const access = fakeAccess([]);
+  const mcp = await connectKeyless(access);
+  await mcp.callTool({ name: "pedra_request_access", arguments: { email: "a@b.co", agentName: "Claude Code" } });
+  assert.strictEqual(access.calls.request[0].agentName, "Claude Code");
+  const res = await mcp.callTool({ name: "pedra_request_access", arguments: {} });
+  assert.strictEqual(res.isError, true);
+});
+
+test("request_access errors (429 rate_limited) surface as tool errors", async () => {
+  const access = fakeAccess([], () => {
+    throw new PedraApiError("Too many requests for this email address.", 429, { error: "x", code: "rate_limited" });
+  });
+  const mcp = await connectKeyless(access);
+  const res = await mcp.callTool({ name: "pedra_request_access", arguments: { email: "a@b.co" } });
+  assert.strictEqual(res.isError, true);
+  assert.match(textOf(res), /HTTP 429, rate_limited/);
+});
+
+test("check_access: pending, then approved unlocks every tool for the session", async () => {
+  const access = fakeAccess([{ status: "pending", pollAfterSeconds: 5 }, APPROVED]);
+  const made = [];
+  const mcp = await connectKeyless(access, (key) => {
+    made.push(key);
+    return fakeClient();
+  });
+
+  const pending = await mcp.callTool({ name: "pedra_check_access", arguments: { requestId: "r1" } });
+  assert.ok(!pending.isError);
+  assert.strictEqual(JSON.parse(textOf(pending)).status, "pending");
+  assert.strictEqual((await mcp.callTool({ name: "pedra_credits", arguments: {} })).isError, true);
+
+  const approved = await mcp.callTool({ name: "pedra_check_access", arguments: { requestId: "r1" } });
+  assert.ok(!approved.isError, textOf(approved));
+  const out = JSON.parse(textOf(approved));
+  assert.strictEqual(out.status, "approved");
+  assert.strictEqual(out.apiKey, "new-key");
+  assert.match(out.message, /PEDRA_API_KEY/);
+  assert.match(out.note, /no credits/);
+  assert.deepStrictEqual(made, ["new-key"]);
+  assert.deepStrictEqual(access.calls.status, ["r1", "r1"]);
+
+  const credits = await mcp.callTool({ name: "pedra_credits", arguments: {} });
+  assert.ok(!credits.isError, textOf(credits));
+  assert.match(textOf(credits), /42/);
+});
+
+test("check_access: approval builds a real SDK client with the new key", async () => {
+  // Default createClient is `new Pedra(key)`, which captures global fetch when
+  // it's built: stub it first, so nothing reaches the network.
+  const prevFetch = globalThis.fetch;
+  let body;
+  globalThis.fetch = async (url, init) => {
+    body = JSON.parse(init.body);
+    return { ok: true, status: 200, text: async () => JSON.stringify({ plan: "free", creditsRemaining: 0 }) };
+  };
+  try {
+    const mcp = await connectKeyless(fakeAccess([APPROVED]));
+    await mcp.callTool({ name: "pedra_check_access", arguments: { requestId: "r1" } });
+    const res = await mcp.callTool({ name: "pedra_credits", arguments: {} });
+    assert.ok(!res.isError, textOf(res));
+    assert.strictEqual(body.apiKey, "new-key");
+  } finally {
+    globalThis.fetch = prevFetch;
+  }
+});
+
+test("check_access: denied and expired don't unlock anything", async () => {
+  for (const status of ["denied", "expired"]) {
+    const mcp = await connectKeyless(fakeAccess([{ status }]), () => {
+      throw new Error("must not build a client");
+    });
+    const res = await mcp.callTool({ name: "pedra_check_access", arguments: { requestId: "r1" } });
+    assert.ok(!res.isError);
+    const out = JSON.parse(textOf(res));
+    assert.strictEqual(out.status, status);
+    assert.strictEqual(out.apiKey, undefined);
+    assert.strictEqual((await mcp.callTool({ name: "pedra_credits", arguments: {} })).isError, true);
+  }
+});
+
+test("the stdio entrypoint starts without PEDRA_API_KEY and lists the access tools", async () => {
+  const { StdioClientTransport } = require("@modelcontextprotocol/sdk/client/stdio.js");
+  const env = { ...process.env };
+  delete env.PEDRA_API_KEY;
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(__dirname, "..", "dist", "index.js")],
+    env,
+    stderr: "pipe",
+  });
+  const mcp = new Client({ name: "test", version: "0.0.0" });
+  await mcp.connect(transport);
+  try {
+    const { tools } = await mcp.listTools();
+    const names = tools.map((t) => t.name);
+    assert.ok(names.includes("pedra_request_access"));
+    assert.ok(names.includes("pedra_check_access"));
+    const res = await mcp.callTool({ name: "pedra_list_properties", arguments: {} });
+    assert.strictEqual(res.isError, true);
+    assert.match(textOf(res), /No API key yet/);
+  } finally {
+    await mcp.close();
   }
 });
