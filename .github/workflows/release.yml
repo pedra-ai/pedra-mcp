@@ -65,6 +65,13 @@ jobs:
             | tar -xz mcp-publisher
 
       - name: Publish to the official MCP registry
+        # The registry checks the npm version exists; npm can take a minute to
+        # show a fresh publish, so wait for it first.
         run: |
+          VERSION=$(node -p "require('./package.json').version")
+          for i in $(seq 1 30); do
+            npm view "@pedra-ai/mcp@${VERSION}" version >/dev/null 2>&1 && break
+            sleep 10
+          done
           ./mcp-publisher login github-oidc
           ./mcp-publisher publish
