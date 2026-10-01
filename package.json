@@ -1,6 +1,6 @@
 {
   "name": "@pedra-ai/mcp",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "mcpName": "io.github.pedra-ai/pedra-mcp",
   "description": "Official Model Context Protocol (MCP) server for the Pedra API — use Pedra's AI real-estate photo editing (virtual staging, renovation, enhancement, sky replacement, object removal/blur, video, and 360° virtual tours) from Claude, ChatGPT, Cursor, and other MCP clients.",
   "publishConfig": {
@@ -50,7 +50,6 @@
     "build": "tsc",
     "clean": "rm -rf dist",
     "start": "node dist/index.js",
-    "start:remote": "node dist/remote.js",
     "prepublishOnly": "npm run clean && npm run build",
     "test": "npm run build && node --test test/*.test.js"
   },

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1
+
+- **Security:** removed `src/remote.ts` (`dist/remote.js`, `npm run start:remote`), an unused prototype HTTP transport. It served the same tools as the local stdio server, including the ones that read local files, to any network caller, before the API key was checked. Reported by Syed Anas Mohiuddin. Pedra's hosted MCP server (`https://app.pedra.ai/mcp`) runs separately and was never affected. This package is now stdio only: local files are only read for the local user running it.
+
 ## 0.5.0
 
 - **Virtual tours.** Six new tools with the same names, descriptions, input
