@@ -6,7 +6,10 @@ name: Release
 #   3. build the .mcpb bundle and attach it to a GitHub Release for the tag
 #      (so the Anthropic MCP directory can pick up new versions from Releases).
 #
-# Requires one repo secret: NPM_TOKEN (an npm automation token for the @pedra-ai org).
+# npm publishing uses Trusted Publishing: npm checks this workflow's GitHub
+# OIDC identity (configured on the package's npm settings page: repo
+# pedra-ai/pedra-mcp, workflow release.yml), so there is no token to store or
+# renew. It needs npm >= 11.5.1, hence the npm upgrade step.
 # The MCP registry publish needs no secret — it authenticates with the workflow's
 # GitHub OIDC token, which authorizes the `io.github.pedra-ai/*` namespace.
 # The GitHub Release uses the built-in GITHUB_TOKEN (needs contents: write).
@@ -18,7 +21,7 @@ on:
 
 permissions:
   contents: write # create GitHub Release + upload the .mcpb asset
-  id-token: write # npm provenance + mcp-publisher github-oidc
+  id-token: write # npm trusted publishing + provenance, mcp-publisher github-oidc
 
 jobs:
   release:
@@ -28,16 +31,21 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           registry-url: "https://registry.npmjs.org"
+
+      - run: npm install -g npm@latest
 
       - run: npm ci
       - run: npm test
 
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        # No token: npm exchanges the workflow's OIDC identity for a one-off
+        # publish token. setup-node sets a placeholder NODE_AUTH_TOKEN, cleared
+        # here so npm can't try (and fail with a 404) on that instead.
+        run: npm publish --provenance --access public --loglevel verbose
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ""
 
       - name: Build .mcpb bundle
         run: npx --yes @anthropic-ai/mcpb pack . "pedra-mcp-${GITHUB_REF_NAME}.mcpb"
