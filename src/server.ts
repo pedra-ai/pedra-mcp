@@ -14,7 +14,7 @@ import {
 } from "@pedra-ai/sdk";
 
 export const SERVER_NAME = "pedra";
-export const SERVER_VERSION = "0.5.1";
+export const SERVER_VERSION = "0.6.0";
 
 /** A Pedra-shaped client. Typed structurally so tests can inject a fake. */
 export type PedraClient = Pick<
@@ -95,7 +95,12 @@ function fail(err: unknown): ToolResult {
 
 /** Image endpoints all return the same normalized shape. */
 function imageOut(res: ImageResponse): ToolResult {
-  return ok({ message: res.message, url: res.url, urls: res.urls });
+  return ok({
+    message: res.message,
+    url: res.url,
+    urls: res.urls,
+    ...(res.source ? { source: res.source } : {}),
+  });
 }
 
 /** Catch errors from every handler so they surface as tool errors, not crashes. */
@@ -282,6 +287,31 @@ const preserveOriginalFraming = z
   .describe(
     "Preserve the original framing/aspect ratio/resolution exactly (for verification verticals where the output must legally represent the captured photo). Defaults to false.",
   );
+
+// Shared by every image-editing tool; same wording as Pedra's hosted MCP server.
+const editOptions = {
+  preserveAspectRatio: z
+    .boolean()
+    .describe(
+      "By default the output comes back at whatever size the AI model produces, which may not match the input's aspect ratio or resolution. Set to true to get the result at the exact width and height of the input image (center-cropped to the original aspect ratio, never stretched). Defaults to false.",
+    )
+    .optional(),
+  propertyId: z
+    .string()
+    .describe(
+      "Optional id of the Pedra property (from pedra_list_properties) this photo belongs to. When set, the result is saved into that property's gallery — visible and editable from the app — instead of only being returned as a URL.",
+    )
+    .optional(),
+  name: z
+    .string()
+    .max(200)
+    .describe(
+      "Optional name for the original photo (e.g. its file name), up to 200 characters. Only used with propertyId: if the photo isn't in that property yet, it's saved there under this name in the same call and returned as source.name. A photo already in the property keeps its name. Never shown on the image.",
+    )
+    .optional(),
+};
+const SAVE_TO_PROPERTY =
+  " Pass `propertyId` to save the result into that property's gallery instead of only returning a URL.";
 
 // Shared video building blocks, reused by pedra_create_video and pedra_update_video.
 const videoImage = z.object({
@@ -481,9 +511,10 @@ export function createServer(
     {
       title: "Enhance image",
       description:
-        "Enhance a real-estate photo: improve lighting, color, and sharpness. Returns the enhanced image URL.",
+        "Enhance a real-estate photo: improve lighting, color, and sharpness. Returns the enhanced image URL." + SAVE_TO_PROPERTY,
       inputSchema: {
         imageUrl,
+        ...editOptions,
         preserveOriginalFraming: preserveOriginalFraming.optional(),
       },
     },
@@ -496,9 +527,10 @@ export function createServer(
     {
       title: "Enhance + correct perspective",
       description:
-        "Enhance a photo and correct vertical/horizontal perspective (straighten walls and lines). Returns the corrected image URL.",
+        "Enhance a photo and correct vertical/horizontal perspective (straighten walls and lines). Returns the corrected image URL." + SAVE_TO_PROPERTY,
       inputSchema: {
         imageUrl,
+        ...editOptions,
         preserveOriginalFraming: preserveOriginalFraming.optional(),
       },
     },
@@ -513,8 +545,8 @@ export function createServer(
     {
       title: "Empty room",
       description:
-        "Remove all furniture and objects from a room, leaving an empty space. Returns the emptied image URL.",
-      inputSchema: { imageUrl },
+        "Remove all furniture and objects from a room, leaving an empty space. Returns the emptied image URL." + SAVE_TO_PROPERTY,
+      inputSchema: { imageUrl, ...editOptions },
     },
     guard(async (a) => imageOut(await api().empty(withResolvedImages(a)))),
   );
@@ -525,9 +557,10 @@ export function createServer(
     {
       title: "Furnish / virtually stage",
       description:
-        "Virtually stage (furnish) a room with AI-generated furniture. Returns the staged image URL.",
+        "Virtually stage (furnish) a room with AI-generated furniture. Returns the staged image URL." + SAVE_TO_PROPERTY,
       inputSchema: {
         imageUrl,
+        ...editOptions,
         roomType: z
           .string()
           .describe('e.g. "Living room", "Bedroom", "Kitchen". Auto-detected if omitted.')
@@ -547,9 +580,10 @@ export function createServer(
     {
       title: "Renovate space",
       description:
-        "Renovate a space (walls, floors, finishes), optionally furnished. Returns the renovated image URL.",
+        "Renovate a space (walls, floors, finishes), optionally furnished. Returns the renovated image URL." + SAVE_TO_PROPERTY,
       inputSchema: {
         imageUrl,
+        ...editOptions,
         style: z.string().describe("Renovation style.").optional(),
         furnish: z
           .union([
@@ -572,9 +606,10 @@ export function createServer(
     {
       title: "Edit via prompt",
       description:
-        "Edit an image from a natural-language instruction (e.g. \"paint the walls sage green\"). Returns the edited image URL.",
+        "Edit an image from a natural-language instruction (e.g. \"paint the walls sage green\"). Returns the edited image URL." + SAVE_TO_PROPERTY,
       inputSchema: {
         imageUrl,
+        ...editOptions,
         prompt: z
           .string()
           .describe("Natural-language description of the edit to apply."),
@@ -589,9 +624,10 @@ export function createServer(
     {
       title: "Replace sky",
       description:
-        "Replace a dull or overcast sky with a clear blue one. Returns the image URL with the new sky.",
+        "Replace a dull or overcast sky with a clear blue one. Returns the image URL with the new sky." + SAVE_TO_PROPERTY,
       inputSchema: {
         imageUrl,
+        ...editOptions,
         skyStyle: z.string().describe("Optional named sky style.").optional(),
       },
     },
@@ -604,9 +640,10 @@ export function createServer(
     {
       title: "Remove object",
       description:
-        "Remove an object from an image using a mask. Returns the cleaned image URL.",
+        "Remove an object from an image using a mask. Returns the cleaned image URL." + SAVE_TO_PROPERTY,
       inputSchema: {
         imageUrl,
+        ...editOptions,
         maskUrl: z
           .string()
           .describe(
@@ -623,9 +660,10 @@ export function createServer(
     {
       title: "Blur objects",
       description:
-        "Blur objects in an image (e.g. faces, license plates) for privacy. Returns the blurred image URL.",
+        "Blur objects in an image (e.g. faces, license plates) for privacy. Returns the blurred image URL." + SAVE_TO_PROPERTY,
       inputSchema: {
         imageUrl,
+        ...editOptions,
         objectsToBlur: z
           .array(z.string())
           .describe('Labels/regions to blur, e.g. ["faces", "license plates"].'),
@@ -862,6 +900,12 @@ export function createServer(
           .describe(
             'Image URLs to fetch and add to the property: up to 20 photos, or up to 10 when type is "360".',
           ),
+        names: z
+          .array(z.string())
+          .describe(
+            "Optional names, one per image in the same order as imageUrls (e.g. the original file names), up to 200 characters each. Returned by pedra_list_property_images and as source.name when the photo is edited. Never shown on the image.",
+          )
+          .optional(),
         type: imageType.describe(
           'What the images are: regular photos ("photo", the default) or 360° photos ("360").',
         ),

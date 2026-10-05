@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0
+
+- **Save edits into a property.** The nine image-editing tools
+  (`pedra_enhance` … `pedra_blur`) accept `propertyId`, `name` and
+  `preserveAspectRatio`, with the same wording as Pedra's hosted MCP server.
+  With `propertyId` the result is saved into that property's gallery; with
+  `name` too, the original photo is saved there under that name in the same
+  call. Results include `source` (`imageId`, `name`) when available.
+- `pedra_add_images_to_property` accepts `names`, one per image.
+- Requires `@pedra-ai/sdk` 0.5.0.
+
 ## 0.5.1
 
 - **Security:** removed `src/remote.ts` (`dist/remote.js`, `npm run start:remote`), an unused prototype HTTP transport. It served the same tools as the local stdio server, including the ones that read local files, to any network caller, before the API key was checked. Reported by Syed Anas Mohiuddin. Pedra's hosted MCP server (`https://app.pedra.ai/mcp`) runs separately and was never affected. This package is now stdio only: local files are only read for the local user running it.

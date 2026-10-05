@@ -95,6 +95,8 @@ Until then, the other tools answer "No API key yet: call pedra_request_access wi
 
 ## Tools
 
+The nine image-editing tools (enhance through blur) also take `propertyId`, to save the result into that property's gallery, and `name`, to save the original photo there under that name in the same call. The result then includes `source` (`imageId`, `name`) of the original. `preserveAspectRatio` returns the result at the input's exact size.
+
 | Tool | Endpoint | What it does |
 |------|----------|--------------|
 | `pedra_enhance` | `/enhance` | Improve lighting, color, sharpness |
@@ -114,7 +116,7 @@ Until then, the other tools answer "No API key yet: call pedra_request_access wi
 | `pedra_list_properties` | `/list_properties` | List the account's properties |
 | `pedra_list_property_images` | `/list_property_images` | List a property's photos (or, with `type: "360"`, its 360° photos) as URLs |
 | `pedra_create_property` | `/create_property` | Create a property |
-| `pedra_add_images_to_property` | `/add_images_to_property` | Add photos (or, with `type: "360"`, 360° photos) to a property by URL |
+| `pedra_add_images_to_property` | `/add_images_to_property` | Add photos (or, with `type: "360"`, 360° photos) to a property by URL, optionally with `names` |
 | `pedra_add_local_panoramas` | `/add_images_to_property` (batched) | **Local only:** upload 360° photo files from this computer into a property |
 | `pedra_create_upload_link` | `/create_upload_link` | No-login page to upload photos or 360° photos from a phone or computer (`type: "360"` for tours only) |
 | `pedra_create_virtual_tour` | `/create_virtual_tour` | Build a hosted 360° virtual tour (AI names and links the rooms) |

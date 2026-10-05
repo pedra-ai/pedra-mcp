@@ -197,6 +197,42 @@ test("enhance returns the asset URL and is not an error", async () => {
   assert.match(textOf(res), /https:\/\/img\.pedra\.ai\/enhanced/);
 });
 
+test("edit tools forward propertyId and name and return source", async () => {
+  let got;
+  const mcp = await connect(
+    fakeClient({
+      furnish: async (params) => {
+        got = params;
+        return {
+          url: "https://img.pedra.ai/furnish",
+          urls: ["https://img.pedra.ai/furnish"],
+          source: { imageId: "img1", name: "IMG_0412.jpg" },
+          raw: {},
+        };
+      },
+    }),
+  );
+  const res = await mcp.callTool({
+    name: "pedra_furnish",
+    arguments: { imageUrl: "https://example.com/room.jpg", propertyId: "p1", name: "IMG_0412.jpg" },
+  });
+  assert.ok(!res.isError);
+  assert.equal(got.propertyId, "p1");
+  assert.equal(got.name, "IMG_0412.jpg");
+  assert.match(textOf(res), /IMG_0412\.jpg/);
+});
+
+test("every image-editing tool accepts propertyId, name and preserveAspectRatio", async () => {
+  const mcp = await connect(fakeClient());
+  const { tools } = await mcp.listTools();
+  for (const name of EXPECTED_TOOLS.slice(0, 9)) {
+    const props = tools.find((t) => t.name === name).inputSchema.properties;
+    for (const key of ["propertyId", "name", "preserveAspectRatio"]) {
+      assert.ok(props[key], `${name} is missing ${key}`);
+    }
+  }
+});
+
 test("create_video returns the finished video URL", async () => {
   const mcp = await connect(fakeClient());
   const res = await mcp.callTool({
