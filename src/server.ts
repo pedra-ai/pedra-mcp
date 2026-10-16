@@ -317,12 +317,22 @@ const SAVE_TO_PROPERTY =
 const videoImage = z.object({
   imageUrl,
   effect: z
-    .enum(["zoom-in", "zoom-out", "transition", "static"])
-    .describe('Animation for this image. Defaults to "zoom-in".')
+    .enum([
+      "zoom-in",
+      "zoom-out",
+      "transition",
+      "sky-transition",
+      "lite-zoom-in",
+      "lite-zoom-out",
+      "static",
+    ])
+    .describe(
+      'Animation for this image. Defaults to "zoom-in" (AI, 5 credits). "transition" morphs between two photos; "sky-transition" changes only the sky and light between two versions of the same photo (day to night, day to sunset); both need secondImageUrl and cost 5 credits. "lite-zoom-in" / "lite-zoom-out" are a free, subtler 3D push (no AI video, 0 credits). "static" is a still frame, also free.',
+    )
     .optional(),
   secondImageUrl: z
     .string()
-    .describe('Required when effect is "transition".')
+    .describe('Required when effect is "transition" or "sky-transition".')
     .optional(),
   subtitle: z.string().optional(),
   title: z.string().optional(),
