@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1
+
+- **Video effects.** `pedra_create_video` and `pedra_update_video` accept
+  `"sky-transition"` (changes only the sky and light between two versions of
+  the same photo, needs `secondImageUrl`, 5 credits) and the free
+  `"lite-zoom-in"` / `"lite-zoom-out"`: a subtler 3D push rendered without an
+  AI video model, 0 credits like `"static"`.
+
 ## 0.6.0
 
 - **Save edits into a property.** The nine image-editing tools
