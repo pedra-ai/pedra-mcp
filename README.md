@@ -95,12 +95,14 @@ Until then, the other tools answer "No API key yet: call pedra_request_access wi
 
 ## Tools
 
-The nine image-editing tools (enhance through blur) also take `propertyId`, to save the result into that property's gallery, and `name`, to save the original photo there under that name in the same call. The result then includes `source` (`imageId`, `name`) of the original. `preserveAspectRatio` returns the result at the input's exact size.
+The image-editing tools (enhance through blur, plus correct_perspective and make_hd) also take `propertyId`, to save the result into that property's gallery, and `name`, to save the original photo there under that name in the same call. The result then includes `source` (`imageId`, `name`) of the original. `preserveAspectRatio` returns the result at the input's exact size (not on make_hd, whose output is meant to be larger).
 
 | Tool | Endpoint | What it does |
 |------|----------|--------------|
 | `pedra_enhance` | `/enhance` | Improve lighting, color, sharpness |
 | `pedra_enhance_and_correct_perspective` | `/enhance_and_correct_perspective` | Enhance + straighten perspective |
+| `pedra_correct_perspective` | `/correct_perspective` | Straighten perspective only, no enhance |
+| `pedra_make_hd` | `/make_hd` | AI upscale to a sharper, higher-resolution photo |
 | `pedra_empty_room` | `/empty_room` | Remove all furniture/objects |
 | `pedra_furnish` | `/furnish` | Virtually stage a room |
 | `pedra_renovation` | `/renovation` | Renovate walls/floors/finishes |

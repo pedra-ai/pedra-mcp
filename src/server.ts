@@ -14,13 +14,15 @@ import {
 } from "@pedra-ai/sdk";
 
 export const SERVER_NAME = "pedra";
-export const SERVER_VERSION = "0.6.1";
+export const SERVER_VERSION = "0.7.0";
 
 /** A Pedra-shaped client. Typed structurally so tests can inject a fake. */
 export type PedraClient = Pick<
   Pedra,
   | "enhance"
   | "enhanceAndCorrectPerspective"
+  | "correctPerspective"
+  | "makeHD"
   | "empty"
   | "furnish"
   | "renovation"
@@ -547,6 +549,36 @@ export function createServer(
     guard(async (a) =>
       imageOut(await api().enhanceAndCorrectPerspective(withResolvedImages(a))),
     ),
+  );
+
+  register(
+    server,
+    "pedra_correct_perspective",
+    {
+      title: "Correct perspective",
+      description:
+        "Straighten vertical lines in a photo shot with a tilted camera, without enhancing light or color. Use pedra_enhance_and_correct_perspective to do both. Returns the corrected image URL." + SAVE_TO_PROPERTY,
+      inputSchema: { imageUrl, ...editOptions },
+    },
+    guard(async (a) =>
+      imageOut(await api().correctPerspective(withResolvedImages(a))),
+    ),
+  );
+
+  register(
+    server,
+    "pedra_make_hd",
+    {
+      title: "Make HD",
+      description:
+        "Upscale a photo with AI to a sharper, higher-resolution version. Use it on small or blurry listing photos. Returns the HD image URL." + SAVE_TO_PROPERTY,
+      inputSchema: {
+        imageUrl,
+        propertyId: editOptions.propertyId,
+        name: editOptions.name,
+      },
+    },
+    guard(async (a) => imageOut(await api().makeHD(withResolvedImages(a)))),
   );
 
   register(

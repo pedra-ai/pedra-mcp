@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0
+
+- `pedra_correct_perspective`: straightens vertical lines only, without the
+  enhance pass. 1 credit.
+- `pedra_make_hd`: AI upscale to a sharper, higher-resolution photo. 1 credit.
+  Takes `propertyId` and `name` but not `preserveAspectRatio`.
+- Requires `@pedra-ai/sdk` 0.6.0.
+
 ## 0.6.1
 
 - **Video effects.** `pedra_create_video` and `pedra_update_video` accept

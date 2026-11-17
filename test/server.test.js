@@ -36,6 +36,8 @@ const EXPECTED_TOOLS = [
   "pedra_add_virtual_tour_scenes",
   "pedra_credits",
   "pedra_feedback",
+  "pedra_correct_perspective",
+  "pedra_make_hd",
 ];
 
 const TOUR = {
@@ -57,6 +59,8 @@ function fakeClient(overrides = {}) {
   return {
     enhance: async () => img("https://img.pedra.ai/enhanced"),
     enhanceAndCorrectPerspective: async () => img("https://img.pedra.ai/persp"),
+    correctPerspective: async () => img("https://img.pedra.ai/perspective-only"),
+    makeHD: async () => img("https://img.pedra.ai/hd"),
     empty: async () => img("https://img.pedra.ai/empty"),
     furnish: async () => img("https://img.pedra.ai/furnish"),
     renovation: async () => img("https://img.pedra.ai/reno"),
@@ -900,4 +904,20 @@ test("the stdio entrypoint starts without PEDRA_API_KEY and lists the access too
   } finally {
     await mcp.close();
   }
+});
+
+test("correct_perspective and make_hd return their image URLs", async () => {
+  const mcp = await connect(fakeClient());
+  const p = await mcp.callTool({
+    name: "pedra_correct_perspective",
+    arguments: { imageUrl: "https://example.com/a.jpg" },
+  });
+  assert.ok(!p.isError);
+  assert.match(textOf(p), /perspective-only/);
+  const hd = await mcp.callTool({
+    name: "pedra_make_hd",
+    arguments: { imageUrl: "https://example.com/a.jpg", propertyId: "p1" },
+  });
+  assert.ok(!hd.isError);
+  assert.match(textOf(hd), /img\.pedra\.ai\/hd/);
 });
