@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0
+
+- `pedra_furnish_same_room`: stage 2 to 10 photos of the SAME room so every
+  angle gets the same furniture in the same places. Stages the first photo in
+  the given style (or copies `referenceImageUrl`), then furnishes the other
+  angles from it. 1 credit for the first photo, 2 per extra angle. Photos can
+  be local files. Runs in the background and returns a `jobId`.
+- `pedra_get_furnish_same_room`: read a same-room job (`processing`, `ready`,
+  `partial` or `failed`) with one result per photo. Read-only.
+- Requires `@pedra-ai/sdk` 0.7.0.
+
 ## 0.7.0
 
 - `pedra_correct_perspective`: straightens vertical lines only, without the

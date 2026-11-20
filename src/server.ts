@@ -14,7 +14,7 @@ import {
 } from "@pedra-ai/sdk";
 
 export const SERVER_NAME = "pedra";
-export const SERVER_VERSION = "0.7.0";
+export const SERVER_VERSION = "0.8.0";
 
 /** A Pedra-shaped client. Typed structurally so tests can inject a fake. */
 export type PedraClient = Pick<
@@ -25,6 +25,8 @@ export type PedraClient = Pick<
   | "makeHD"
   | "empty"
   | "furnish"
+  | "furnishSameRoom"
+  | "getFurnishSameRoom"
   | "renovation"
   | "editViaPrompt"
   | "sky"
@@ -221,6 +223,11 @@ function withResolvedImages<T extends Record<string, any>>(args: T): T {
     out.maskUrl = resolveImageInput(out.maskUrl);
   if (typeof out.secondImageUrl === "string")
     out.secondImageUrl = resolveImageInput(out.secondImageUrl);
+  // pedra_furnish_same_room: each photo may be a local file too.
+  if (Array.isArray(out.imageUrls))
+    out.imageUrls = out.imageUrls.map((u: unknown) =>
+      typeof u === "string" ? resolveImageInput(u) : u,
+    );
   if (Array.isArray(out.images)) {
     out.images = out.images.map((frame: any) => {
       if (!frame || typeof frame !== "object") return frame;
@@ -614,6 +621,63 @@ export function createServer(
       },
     },
     guard(async (a) => imageOut(await api().furnish(withResolvedImages(a)))),
+  );
+
+  register(
+    server,
+    "pedra_furnish_same_room",
+    {
+      title: "Stage one room from several angles",
+      description:
+        "Virtually stage 2 to 10 photos of the SAME room, taken from different angles, so every photo gets the same furniture in the same places. Stages the first photo in the given style, then furnishes every other angle from it (or from referenceImageUrl if the room is already staged). Use this instead of calling pedra_furnish per photo whenever the user has several shots of one room: pedra_furnish would give each photo different furniture. Put the widest shot first. Costs 1 credit for the first photo and 2 per extra angle. Runs in the background: returns a jobId right away; call pedra_get_furnish_same_room with it until status is ready.",
+      inputSchema: {
+        imageUrls: z
+          .array(z.string())
+          .min(2)
+          .max(10)
+          .describe(
+            "2 to 10 photos of one room, widest shot first: public https:// URLs, data: URIs, or absolute paths to local image files on this computer. One room per call: stage the living room and the bedroom as separate calls.",
+          ),
+        roomType: z
+          .string()
+          .describe('e.g. "Living room", "Bedroom". Auto-detected if omitted.')
+          .optional(),
+        style: z
+          .string()
+          .describe('Style for the first photo, e.g. "Minimalist", "Scandinavian". Required unless referenceImageUrl is set.')
+          .optional(),
+        referenceImageUrl: z
+          .string()
+          .describe(
+            "Optional public URL of a photo of this room that is already staged. Every photo in imageUrls is then furnished to match it (2 credits each) and style is ignored.",
+          )
+          .optional(),
+        preserveAspectRatio: editOptions.preserveAspectRatio,
+        propertyId: editOptions.propertyId,
+      },
+    },
+    guard(async (a) => {
+      const { raw, ...rest } = await api().furnishSameRoom(withResolvedImages(a));
+      return ok(rest);
+    }),
+  );
+
+  register(
+    server,
+    "pedra_get_furnish_same_room",
+    {
+      title: "Check multi-angle staging",
+      description:
+        'Check a job started with pedra_furnish_same_room. Returns status "processing", "ready", "partial" (some photos failed and weren\'t charged) or "failed", plus one output per photo in the order sent, each with its own status and, once ready, its url. Never spends credits.',
+      inputSchema: {
+        jobId: z.string().describe("Id returned by pedra_furnish_same_room."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    guard(async (a) => {
+      const { raw, ...rest } = await api().getFurnishSameRoom(a.jobId);
+      return ok(rest);
+    }),
   );
 
   register(

@@ -105,6 +105,8 @@ The image-editing tools (enhance through blur, plus correct_perspective and make
 | `pedra_make_hd` | `/make_hd` | AI upscale to a sharper, higher-resolution photo |
 | `pedra_empty_room` | `/empty_room` | Remove all furniture/objects |
 | `pedra_furnish` | `/furnish` | Virtually stage a room |
+| `pedra_furnish_same_room` | `/furnish_same_room` | Stage several angles of one room with the same furniture in the same places (background job) |
+| `pedra_get_furnish_same_room` | `/furnish_same_room_status` | Check a same-room job, one result per photo |
 | `pedra_renovation` | `/renovation` | Renovate walls/floors/finishes |
 | `pedra_edit_via_prompt` | `/edit_via_prompt` | Edit from a natural-language prompt |
 | `pedra_sky_blue` | `/sky_blue` | Replace a dull sky with clear blue |

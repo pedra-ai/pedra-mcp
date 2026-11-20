@@ -38,6 +38,8 @@ const EXPECTED_TOOLS = [
   "pedra_feedback",
   "pedra_correct_perspective",
   "pedra_make_hd",
+  "pedra_furnish_same_room",
+  "pedra_get_furnish_same_room",
 ];
 
 const TOUR = {
@@ -63,6 +65,25 @@ function fakeClient(overrides = {}) {
     makeHD: async () => img("https://img.pedra.ai/hd"),
     empty: async () => img("https://img.pedra.ai/empty"),
     furnish: async () => img("https://img.pedra.ai/furnish"),
+    furnishSameRoom: async () => ({
+      jobId: "j1",
+      status: "processing",
+      creditsEstimated: 3,
+      output: [
+        { index: 0, status: "processing", url: null },
+        { index: 1, status: "processing", url: null },
+      ],
+      raw: {},
+    }),
+    getFurnishSameRoom: async () => ({
+      jobId: "j1",
+      status: "ready",
+      output: [
+        { index: 0, status: "ready", url: "https://img.pedra.ai/a0" },
+        { index: 1, status: "ready", url: "https://img.pedra.ai/a1" },
+      ],
+      raw: {},
+    }),
     renovation: async () => img("https://img.pedra.ai/reno"),
     editViaPrompt: async () => img("https://img.pedra.ai/edit"),
     sky: async () => img("https://img.pedra.ai/sky"),
@@ -920,4 +941,37 @@ test("correct_perspective and make_hd return their image URLs", async () => {
   });
   assert.ok(!hd.isError);
   assert.match(textOf(hd), /img\.pedra\.ai\/hd/);
+});
+
+test("furnish_same_room starts a job, resolving local photos", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pedra-sr-"));
+  const file = path.join(dir, "angle2.jpg");
+  fs.writeFileSync(file, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+  let got;
+  const mcp = await connect(
+    fakeClient({
+      furnishSameRoom: async (params) => {
+        got = params;
+        return { jobId: "j1", status: "processing", output: [], raw: {} };
+      },
+    }),
+  );
+  const res = await mcp.callTool({
+    name: "pedra_furnish_same_room",
+    arguments: { imageUrls: ["https://example.com/a.jpg", file], style: "Minimalist" },
+  });
+  assert.ok(!res.isError);
+  assert.equal(got.imageUrls[0], "https://example.com/a.jpg");
+  assert.match(got.imageUrls[1], /^data:image\/jpeg;base64,/);
+  assert.equal(got.style, "Minimalist");
+  assert.match(textOf(res), /"jobId": "j1"/);
+});
+
+test("get_furnish_same_room returns each photo's url and is read-only", async () => {
+  const mcp = await connect(fakeClient());
+  const { tools } = await mcp.listTools();
+  assert.equal(tools.find((t) => t.name === "pedra_get_furnish_same_room").annotations.readOnlyHint, true);
+  const res = await mcp.callTool({ name: "pedra_get_furnish_same_room", arguments: { jobId: "j1" } });
+  assert.ok(!res.isError);
+  assert.match(textOf(res), /https:\/\/img\.pedra\.ai\/a1/);
 });
